@@ -20,8 +20,6 @@
   .tag-unverified { background: #fff3cd; color: #664d03; }
   .tag-disproven { background: #f8d7da; color: #842029; }
   .spine-area { position: relative; height: 50px; display: flex; align-items: center; margin: 0.5rem 0; }
-  .spine-line { flex: 1; height: 3px; background: #333; }
-  .head { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 0; height: 0; border-top: 12px solid transparent; border-bottom: 12px solid transparent; border-left: 20px solid #333; }
   .notes { margin-top: 1.5rem; }
   .notes label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
   .notes textarea { width: 100%; min-height: 120px; border: 1px solid #ced4da; border-radius: 4px; padding: 0.75rem; font-family: inherit; }
@@ -52,10 +50,7 @@
       <div class="category"><div class="label">Technology</div><div class="causes" contenteditable="true">tools, infra, config</div></div>
     </div>
 
-    <div class="spine-area" id="spineArea">
-      <div class="spine-line"></div>
-      <div class="head"></div>
-    </div>
+    <div class="spine-area" id="spineArea"></div>
 
     <div class="row bottom" id="bottomRow">
       <div class="category"><div class="label">Data</div><div class="causes" contenteditable="true">quality, completeness</div></div>
