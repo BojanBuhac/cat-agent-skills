@@ -65,8 +65,8 @@
   </div>
 
   <div class="notes">
-    <label><strong>Notes / Evidence:</strong></label><br>
-    <textarea placeholder="Add supporting facts, timestamps, logs, or observations for each category..."></textarea>
+    <label for="evidence-notes"><strong>Notes / Evidence:</strong></label><br>
+    <textarea id="evidence-notes" placeholder="Add supporting facts, timestamps, logs, or observations for each category..."></textarea>
   </div>
 
   <script>
@@ -106,7 +106,7 @@
       head.setAttribute('fill', '#333');
       overlay.appendChild(head);
 
-      document.querySelectorAll('.category').forEach(cat => {
+      document.querySelectorAll('.category').forEach((cat, index) => {
         const catRect = cat.getBoundingClientRect();
         const isTop = cat.closest('.top') !== null;
 
@@ -117,9 +117,12 @@
         const startY = isTop ? catRect.bottom - diagramRect.top : catRect.top - diagramRect.top;
         const startX = useLeftEdge ? catRect.left - diagramRect.left : catRect.right - diagramRect.left;
 
-        // End at the point on the spine closest to the start X
+        // Map each category to a distinct spine anchor so bones are angled
+        const categories = Array.from(document.querySelectorAll('.category'));
+        const spineLength = spineEndX - spineStartX;
+        const step = spineLength / (categories.length + 1);
         const endY = spineY;
-        const endX = Math.max(spineStartX, Math.min(spineEndX, startX));
+        const endX = spineStartX + step * (index + 1);
 
         const line = document.createElementNS(svgNS, 'line');
         line.setAttribute('x1', startX);

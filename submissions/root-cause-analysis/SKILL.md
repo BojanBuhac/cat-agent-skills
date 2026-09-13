@@ -32,7 +32,9 @@ Guide the user through structured problem diagnosis to move from observed sympto
     - Do not invent facts; if a factor is uncertain, mark it as unverified.
     - Use `assets/fishbone-template.html` to structure the diagram. Open the template, replace the placeholder text in each category branch with the contributing factors identified above, and return the filled-in HTML so the user can save and open it.
     - Do NOT build a new diagram from scratch. Do NOT generate matplotlib, code-generated plots, or any output that is not based on the provided template. Editing and returning the provided HTML template is the correct output.
+    - Also replace the `PROBLEM STATEMENT` placeholder at the top of the template with the locked problem statement from step 1. Verify that no template placeholder or default text remains before returning the file.
     - Classify every factor as **CONFIRMED**, **UNVERIFIED**, or **DISPROVEN** using the rules in the Evidence classification section below. In particular: only facts stated verbatim or by direct paraphrase in the user's input may be CONFIRMED. If a claim is built on the absence of information — for example, inferring a missing control because no one mentioned it — it must be UNVERIFIED, not CONFIRMED.
+    - Render every factor with its status tag using this exact markup: `<span class="tag tag-{status}">{STATUS}</span> {factor text}`. For example: `<span class="tag tag-confirmed">CONFIRMED</span> Config file was missing at deploy time.` The status value must be one of `CONFIRMED`, `UNVERIFIED`, or `DISPROVEN`.
 
  5. **Separate root cause from contributing factors**
     - Root cause: the fundamental origin that, if eliminated, prevents recurrence.
