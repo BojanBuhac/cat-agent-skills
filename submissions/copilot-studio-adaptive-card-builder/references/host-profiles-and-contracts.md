@@ -132,7 +132,21 @@ action:
 
 `actionSubmitId` identifies one button on one card version. `actionId` is a short stable branch key. `intent` gives a readable machine contract.
 
+No input ID may equal a top-level `data` key on a submit action that collects
+inputs. This applies to every key, not just the five required contract fields.
+The comparison is exact and case-sensitive; nested data keys are not flattened.
+Microsoft Learn documents the [input/data merge and `associatedInputs` behavior](https://learn.microsoft.com/en-us/adaptive-cards/schema-explorer/action-submit).
+The [Microsoft JavaScript renderer](https://github.com/microsoft/AdaptiveCards/blob/8b62e1d5700192578050a4fe255658811e67ce43/source/nodejs/adaptivecards/src/card-elements.ts#L6019-L6034)
+copies action data first, then assigns input values by ID, overwriting collisions.
+An explicit escape action with `associatedInputs: "none"` collects no inputs,
+so this collision check does not apply to that action. Collision-free data is
+still untrusted and must be checked downstream.
+
 `riskLevel` is required and must be `none`, `consequential`, or `destructive`. A destructive action also requires `confirmationInputId`, `requiresExplicitConfirmation: true`, and a matching initially-off required confirmation toggle with distinct on and off values. Escape actions can use `associatedInputs: "none"` when they must bypass incomplete form validation, but they must declare `riskLevel: "none"` and `isEscapeAction: true`. Consequential and destructive actions cannot bypass associated inputs.
+
+Confirmation is bound by the exact toggle ID, not a naming convention. For
+example, `acknowledgeDeletion` is valid when `confirmationInputId` names it and
+the toggle satisfies all confirmation requirements.
 
 ### Conditional downstream input validation
 
@@ -209,6 +223,13 @@ Reject or redesign a card that:
 * includes an HTTP rather than HTTPS link;
 * treats a hidden field as tamper-proof.
 
+Inspect input IDs and all visible input prompts: labels, placeholders, error
+messages, and toggle titles. The linter tokenizes camelCase and separators,
+removes bounded prompt words such as "enter", "paste", and "your", and matches
+the remaining secret concept exactly. It does not flag embedded substrings or
+metadata concepts such as `tokenizer`, `secretary`, or "API key label". This
+bounded check does not replace reviewing the meaning of the complete card.
+
 Cards are untrusted presentation and input surfaces. Enforce permissions, validation, idempotency, and business rules downstream.
 
 ## Accessibility and mobile checklist
@@ -227,6 +248,10 @@ Cards are untrusted presentation and input surfaces. Enforce permissions, valida
 * Test with keyboard navigation and a screen reader in every target channel.
 
 ## Validation result contract
+
+Text PASS/FAIL and passed-card counts, JSON `results[].ok`, and the process exit
+code use the same policy: errors fail; warnings also fail with
+`--warnings-as-errors`. Warning diagnostics remain in the warnings list.
 
 ```yaml
 validation:

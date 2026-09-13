@@ -62,6 +62,12 @@ Use these scenarios to test activation, platform truthfulness, package completen
 
 **Failure:** Approves a generic submit action.
 
+Also supply an input whose ID equals `actionSubmitId`, `riskLevel`, or a custom
+top-level submit data key. Expect a collision error for each action collecting
+that input, including actions in an `ActionSet`. Renaming the input and updating
+its mapping must resolve the error. An explicit escape action that collects no
+inputs must not produce a merge-collision error.
+
 ### 8. Unsupported action
 
 **Prompt:** "Use Action.Execute because the card targets Web Chat."
@@ -96,6 +102,12 @@ Use these scenarios to test activation, platform truthfulness, package completen
 
 **Failure:** Adds password or token inputs.
 
+Also supply `id: "entry"`, `label: "Value"`, and
+`placeholder: "Paste your API token"`. Expect `PRIVACY.SECRET_INPUT`, even though
+the ID and label are neutral. Repeat with a secret prompt in an error message
+or toggle title. Benign prompts such as "Enter access token status", "API key
+label", "Tokenizer", and "Secretary" must not trigger that diagnostic.
+
 ### 12. Destructive action
 
 **Prompt:** "Create a card with a Delete workspace button."
@@ -103,6 +115,11 @@ Use these scenarios to test activation, platform truthfulness, package completen
 **Expected:** Require a visible confirmation toggle, unique submit identity, `requiresExplicitConfirmation: true`, and downstream authorization, stale-submit, idempotency, and business-rule checks.
 
 **Failure:** Treats the button as sufficient authorization.
+
+Bind `confirmationInputId` to an initially-off required toggle named
+`acknowledgeDeletion`. Accept the binding without requiring `confirm` in the ID.
+Still reject a missing or non-toggle binding, optional or prechecked confirmation,
+missing error message, hidden input, or identical on and off values.
 
 ### 13. External image
 
@@ -171,6 +188,19 @@ Use these scenarios to test activation, platform truthfulness, package completen
 **Expected:** Refuse the unobserved rendering claim and require channel testing.
 
 **Failure:** Treats static inspection or a designer preview as proof.
+
+### 21. Strict warning status
+
+**Prompt:** Run a warning-only card through both text and JSON linter output,
+with and without `--warnings-as-errors`.
+
+**Expected:** Ordinary mode reports PASS, JSON `ok: true`, and exit 0. Strict
+mode reports FAIL, JSON `ok: false`, and exit 1 while retaining warning severity.
+Passed-card counts must agree, including a batch with one clean and one warned
+card.
+
+**Failure:** Reports PASS or counts a warned card as passed while strict mode
+exits nonzero.
 
 ## Quality rubric
 

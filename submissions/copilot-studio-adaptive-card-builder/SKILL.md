@@ -115,6 +115,11 @@ Every `Action.Submit` must have a descriptive title and a `data` object containi
 
 Keep each `actionSubmitId` unique. Downstream logic must validate the action identity before acting.
 
+Keep input IDs distinct from every top-level `data` key on submit actions that
+collect inputs. Associated input values can overwrite same-named action data,
+including branch identity and risk metadata. Explicit escape actions using
+`associatedInputs: "none"` collect no inputs and have no such merge collision.
+
 Adaptive Card validation cannot make one input required only for selected submit
 actions. Keep conditionally required inputs optional in the card, then enforce
 the rule downstream after branching on the trusted expected action identity. For
@@ -126,7 +131,7 @@ For destructive or irreversible operations:
 
 * add a clearly worded `Input.Toggle` confirmation;
 * set it as required with an error message;
-* bind it with `confirmationInputId`;
+* bind its exact ID with `confirmationInputId`; the ID need not contain `confirm`;
 * include `riskLevel: "destructive"` and `requiresExplicitConfirmation: true` in submit data;
 * keep `associatedInputs` on `auto` so the confirmation is validated;
 * recheck permissions and business rules downstream;
@@ -167,6 +172,8 @@ python scripts/validate_cards.py card.json --profile portable-1.5 --mode interac
 ```
 
 Repair every error. Review every warning. Run again until the card has no errors.
+When using `--warnings-as-errors`, warnings must also be resolved before the run
+passes. Text status, JSON result `ok`, and exit code reflect that strictness.
 
 The linter checks:
 
@@ -176,10 +183,10 @@ The linter checks:
 * required child arrays and high-confidence property types;
 * duplicate or missing input IDs;
 * labels, required-field errors, and heading or wrapping defaults;
-* `Action.Submit` identity data;
+* `Action.Submit` identity data and collisions with associated input IDs;
 * HTTPS links;
 * unsupported template expressions;
-* secret-like input fields and embedded credential patterns;
+* secret-like input IDs and visible prompts (labels, placeholders, error messages, and toggle titles), plus embedded credential patterns;
 * destructive-action confirmation patterns;
 * interactive versus informational node requirements.
 

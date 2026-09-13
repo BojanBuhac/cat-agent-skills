@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -241,6 +242,80 @@ class CardLinterTests(unittest.TestCase):
         result = self.lint(card)
         self.assertIn("SUBMIT.DATA", self.codes(result))
 
+    def test_submit_data_keys_cannot_collide_with_input_ids(self):
+        keys = (
+            *validate_cards.SUBMIT_CONTRACT_FIELDS,
+            "requiresExplicitConfirmation",
+            "confirmationInputId",
+            "isEscapeAction",
+            "recordId",
+        )
+        for key in keys:
+            for association in (None, "auto"):
+                with self.subTest(key=key, association=association):
+                    card = base_card()
+                    card["body"].append(input_text(key))
+                    card["actions"] = [submit_action("one"), submit_action("two")]
+                    for action in card["actions"]:
+                        action["data"].setdefault(key, "synthetic-value")
+                        if association is not None:
+                            action["associatedInputs"] = association
+                    result = self.lint(card)
+                    collisions = [
+                        item for item in result.errors
+                        if item.code == "SUBMIT.INPUT_DATA_COLLISION"
+                    ]
+                    self.assertEqual(
+                        [item.path for item in collisions],
+                        [f"$.actions[{index}].data.{key}" for index in range(2)],
+                    )
+
+    def test_nested_submit_data_collision_is_checked_after_input_traversal(self):
+        card = base_card()
+        card["body"].append(
+            {
+                "type": "Container",
+                "items": [
+                    {"type": "ActionSet", "actions": [submit_action()]},
+                    input_text("actionId"),
+                ],
+            }
+        )
+        result = self.lint(card)
+        collisions = [
+            item for item in result.errors
+            if item.code == "SUBMIT.INPUT_DATA_COLLISION"
+        ]
+        self.assertEqual(len(collisions), 1)
+        self.assertEqual(
+            collisions[0].path, "$.body[1].items[0].actions[0].data.actionId"
+        )
+
+    def test_submit_data_collision_uses_exact_top_level_keys(self):
+        card = base_card()
+        card["body"].append(input_text("recordId"))
+        action = submit_action()
+        action["data"].update(
+            {
+                "RecordId": "case-sensitive",
+                "recordIdLabel": "Record",
+                "details": {"recordId": "nested"},
+            }
+        )
+        card["actions"] = [action]
+        result = self.lint(card)
+        self.assertTrue(result.ok, result.errors)
+
+    def test_escape_action_without_associated_inputs_has_no_data_collision(self):
+        card = base_card()
+        card["body"].append(input_text("actionId"))
+        action = submit_action("cancel")
+        action["associatedInputs"] = "none"
+        action["data"]["isEscapeAction"] = True
+        card["actions"] = [action]
+        result = self.lint(card)
+        self.assertTrue(result.ok, result.errors)
+
     def test_duplicate_submit_ids_are_rejected(self):
         card = base_card()
         first = submit_action("one")
@@ -362,6 +437,68 @@ class CardLinterTests(unittest.TestCase):
                 result = self.lint(card)
                 self.assertNotIn("PRIVACY.SECRET_INPUT", self.codes(result))
 
+    def test_secret_input_visible_prompts_are_rejected(self):
+        for property_name in ("label", "placeholder", "errorMessage", "title"):
+            for prompt in (
+                "Paste your API token",
+                "Please enter your access_token here",
+                "Provide private.key",
+                "Client secret (required)",
+            ):
+                with self.subTest(property=property_name, prompt=prompt):
+                    card = base_card()
+                    field = {
+                        "type": "Input.Toggle" if property_name == "title" else "Input.Text",
+                        "id": "entry",
+                        "label": "Value",
+                    }
+                    field[property_name] = prompt
+                    card["body"].append(field)
+                    card["actions"] = [submit_action()]
+                    result = self.lint(card)
+                    matches = [
+                        item for item in result.errors
+                        if item.code == "PRIVACY.SECRET_INPUT"
+                    ]
+                    self.assertEqual(len(matches), 1)
+                    self.assertEqual(matches[0].path, "$.body[1]")
+
+    def test_innocuous_input_visible_prompts_are_not_rejected(self):
+        for property_name in ("label", "placeholder", "errorMessage", "title"):
+            for prompt in (
+                "Tokenizer",
+                "Secretary",
+                "Enter credential type",
+                "Enter access token status",
+                "Provide API key label",
+                "Paste your password policy",
+                "Connection string format",
+            ):
+                with self.subTest(property=property_name, prompt=prompt):
+                    card = base_card()
+                    field = {
+                        "type": "Input.Toggle" if property_name == "title" else "Input.Text",
+                        "id": "entry",
+                        "label": "Value",
+                    }
+                    field[property_name] = prompt
+                    card["body"].append(field)
+                    card["actions"] = [submit_action()]
+                    result = self.lint(card)
+                    self.assertTrue(result.ok, result.errors)
+
+    def test_non_string_placeholder_reports_type_error_without_crashing(self):
+        for placeholder in (42, True, [], {}):
+            with self.subTest(placeholder=placeholder):
+                card = base_card()
+                field = input_text()
+                field["placeholder"] = placeholder
+                card["body"].append(field)
+                card["actions"] = [submit_action()]
+                result = self.lint(card)
+                self.assertIn("INPUT.PROPERTY_TYPE", self.codes(result))
+                self.assertNotIn("PRIVACY.SECRET_INPUT", self.codes(result))
+
     def test_secret_property_separator_variants_are_rejected(self):
         for key in (
             "accessToken",
@@ -436,6 +573,45 @@ class CardLinterTests(unittest.TestCase):
         card["actions"] = [action]
         result = self.lint(card)
         self.assertTrue(result.ok)
+
+    def test_confirmation_binding_does_not_require_confirm_in_toggle_id(self):
+        cases = (
+            ({}, "acknowledgeDeletion", None),
+            ({}, "differentToggle", "SAFETY.CONFIRMATION_INPUT"),
+            ({"type": "Input.Text"}, "acknowledgeDeletion", "SAFETY.CONFIRMATION_INPUT"),
+            ({"isRequired": False}, "acknowledgeDeletion", "SAFETY.CONFIRMATION_INPUT"),
+            ({"errorMessage": ""}, "acknowledgeDeletion", "SAFETY.CONFIRMATION_INPUT"),
+            ({"isVisible": False}, "acknowledgeDeletion", "ACCESS.HIDDEN_INPUT"),
+            ({"value": "true"}, "acknowledgeDeletion", "SAFETY.PRECHECKED_CONFIRMATION"),
+            ({"valueOn": "false"}, "acknowledgeDeletion", "TOGGLE.DISTINCT_VALUES"),
+        )
+        for changes, binding, expected_error in cases:
+            with self.subTest(changes=changes, binding=binding):
+                card = base_card()
+                toggle = {
+                    "type": "Input.Toggle",
+                    "id": "acknowledgeDeletion",
+                    "label": "Deletion acknowledgement",
+                    "title": "I understand this permanently deletes the workspace.",
+                    "isRequired": True,
+                    "errorMessage": "Acknowledge permanent deletion to continue.",
+                }
+                toggle.update(changes)
+                card["body"].append({"type": "Container", "items": [toggle]})
+                action = submit_action("delete")
+                action["data"].update(
+                    {
+                        "riskLevel": "destructive",
+                        "requiresExplicitConfirmation": True,
+                        "confirmationInputId": binding,
+                    }
+                )
+                card["actions"] = [action]
+                result = self.lint(card)
+                if expected_error:
+                    self.assertIn(expected_error, self.codes(result))
+                else:
+                    self.assertTrue(result.ok, result.errors)
 
     def test_destructive_action_rejects_prechecked_confirmation(self):
         card = base_card()
@@ -581,6 +757,62 @@ class CardLinterTests(unittest.TestCase):
         del card["body"][0]["style"]
         result = self.lint(card)
         self.assertIn("ACCESS.HEADING", self.codes(result))
+
+    def test_cli_text_and_json_status_match_exit_code(self):
+        for condition in ("clean", "warning", "error"):
+            for strict in (False, True):
+                for output_format in ("text", "json"):
+                    with self.subTest(condition=condition, strict=strict, format=output_format):
+                        card = base_card()
+                        if condition == "warning":
+                            card["actions"] = [
+                                submit_action(str(index)) for index in range(4)
+                            ]
+                        elif condition == "error":
+                            del card["body"][0]["wrap"]
+                        with tempfile.TemporaryDirectory() as directory:
+                            path = Path(directory) / "card.json"
+                            path.write_text(json.dumps(card), encoding="utf-8")
+                            command = [
+                                sys.executable, "-B", str(SCRIPT_PATH), str(path),
+                                "--format", output_format,
+                            ]
+                            if strict:
+                                command.append("--warnings-as-errors")
+                            process = subprocess.run(
+                                command, capture_output=True, text=True, check=False
+                            )
+                        passed = condition == "clean" or (condition == "warning" and not strict)
+                        self.assertEqual(process.returncode, 0 if passed else 1, process.stderr)
+                        self.assertEqual(process.stderr, "")
+                        if output_format == "json":
+                            result = json.loads(process.stdout)["results"][0]
+                            self.assertEqual(result["ok"], passed)
+                            self.assertEqual(len(result["warnings"]), int(condition == "warning"))
+                            self.assertEqual(len(result["errors"]), int(condition == "error"))
+                        else:
+                            self.assertTrue(process.stdout.startswith("PASS " if passed else "FAIL "))
+                            self.assertIn(f"{int(passed)}/1 cards passed.", process.stdout)
+
+    def test_strict_cli_summary_counts_only_passing_cards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            clean_path = Path(directory) / "clean.json"
+            clean_path.write_text(json.dumps(base_card()), encoding="utf-8")
+            warned_card = base_card()
+            warned_card["actions"] = [submit_action(str(index)) for index in range(4)]
+            warned_path = Path(directory) / "warned.json"
+            warned_path.write_text(json.dumps(warned_card), encoding="utf-8")
+            process = subprocess.run(
+                [
+                    sys.executable, "-B", str(SCRIPT_PATH), directory,
+                    "--warnings-as-errors",
+                ],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(process.returncode, 1, process.stderr)
+        self.assertIn(f"PASS {clean_path}", process.stdout)
+        self.assertIn(f"FAIL {warned_path}", process.stdout)
+        self.assertIn("1/2 cards passed.", process.stdout)
 
 
 if __name__ == "__main__":

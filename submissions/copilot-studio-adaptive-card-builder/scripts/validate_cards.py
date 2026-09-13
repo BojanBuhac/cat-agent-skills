@@ -143,6 +143,7 @@ INPUT_LABEL_CONTEXT_TOKENS = {
     "new",
     "old",
     "optional",
+    "paste",
     "please",
     "provide",
     "repeat",
@@ -240,7 +241,10 @@ class LintResult:
     def ok(self) -> bool:
         return not self.errors
 
-    def to_dict(self) -> dict[str, Any]:
+    def passes(self, warnings_as_errors: bool = False) -> bool:
+        return self.ok and (not warnings_as_errors or not self.warnings)
+
+    def to_dict(self, warnings_as_errors: bool = False) -> dict[str, Any]:
         return {
             "file": self.file,
             "profile": self.profile,
@@ -248,7 +252,7 @@ class LintResult:
             "validator": VALIDATOR_NAME,
             "validatorVersion": VALIDATOR_VERSION,
             "scope": "bounded semantic lint, not official schema validation",
-            "ok": self.ok,
+            "ok": self.passes(warnings_as_errors),
             "errors": [asdict(item) for item in self.errors],
             "warnings": [asdict(item) for item in self.warnings],
             "submitIds": [submit_id for submit_id, _ in self.submit_ids],
@@ -266,7 +270,7 @@ class CardLinter:
         self._diagnostics: set[Diagnostic] = set()
         self.card_version = (0, 0)
         self.input_ids: dict[str, str] = {}
-        self.confirmation_toggles: list[dict[str, Any]] = []
+        self.toggle_inputs: list[dict[str, Any]] = []
         self.submit_actions: list[tuple[dict[str, Any], str]] = []
         self.open_url_actions: list[tuple[dict[str, Any], str]] = []
         self.input_count = 0
@@ -648,7 +652,7 @@ class CardLinter:
                     f'"{key}" must be a string.',
                 )
 
-        self._check_secret_field(input_id, label, path)
+        self._check_secret_field(element, path)
 
         if element_type == "Input.Text":
             self._check_text_input(element, path)
@@ -779,11 +783,7 @@ class CardLinter:
                 f"{path}.title",
                 'Input.Toggle requires a descriptive "title".',
             )
-        if (
-            isinstance(element.get("id"), str)
-            and "confirm" in element["id"].lower()
-        ):
-            self.confirmation_toggles.append(element)
+        self.toggle_inputs.append(element)
         for key in ("value", "valueOn", "valueOff"):
             value = element.get(key)
             if value is not None and not isinstance(value, str):
@@ -1043,6 +1043,15 @@ class CardLinter:
                     "Action.Submit data must be an object with the package identity contract.",
                 )
                 continue
+            if action.get("associatedInputs") != "none":
+                for key in data:
+                    if key in self.input_ids:
+                        self.error(
+                            "SUBMIT.INPUT_DATA_COLLISION",
+                            f"{path}.data.{key}",
+                            f'Data key "{key}" collides with input {self.input_ids[key]}; '
+                            "the submitted input value can overwrite action data.",
+                        )
             for field in SUBMIT_CONTRACT_FIELDS:
                 value = data.get(field)
                 if not isinstance(value, str) or not value.strip():
@@ -1111,7 +1120,7 @@ class CardLinter:
             )
             matching_toggles = [
                 toggle
-                for toggle in self.confirmation_toggles
+                for toggle in self.toggle_inputs
                 if toggle.get("id") == confirmation_id
             ]
             if not isinstance(confirmation_id, str) or not confirmation_id:
@@ -1124,7 +1133,7 @@ class CardLinter:
                 self.error(
                     "SAFETY.CONFIRMATION_INPUT",
                     path,
-                    "confirmationInputId must match a visible Input.Toggle whose id contains 'confirm'.",
+                    "confirmationInputId must match the id of a visible Input.Toggle.",
                 )
             else:
                 toggle = matching_toggles[0]
@@ -1165,10 +1174,13 @@ class CardLinter:
                 "A long card body may be difficult to scan on mobile. Consider splitting the interaction.",
             )
 
-    def _check_secret_field(self, input_id: Any, label: Any, path: str) -> None:
+    def _check_secret_field(self, element: dict[str, Any], path: str) -> None:
+        # Placeholders, error messages, and toggle titles prompt users like labels,
+        # so share the bounded label context words, not the identifier token set.
         candidates = (
-            (input_id, INPUT_ID_CONTEXT_TOKENS),
-            (label, INPUT_LABEL_CONTEXT_TOKENS),
+            (element.get("id"), INPUT_ID_CONTEXT_TOKENS),
+            *((element.get(key), INPUT_LABEL_CONTEXT_TOKENS)
+              for key in ("label", "placeholder", "errorMessage", "title")),
         )
         is_sensitive = any(
             isinstance(value, str)
@@ -1329,9 +1341,9 @@ def apply_batch_checks(results: list[LintResult]) -> None:
             result.errors.sort(key=lambda item: (item.path, item.code))
 
 
-def print_text(results: list[LintResult]) -> None:
+def print_text(results: list[LintResult], warnings_as_errors: bool = False) -> None:
     for result in results:
-        status = "PASS" if result.ok else "FAIL"
+        status = "PASS" if result.passes(warnings_as_errors) else "FAIL"
         print(
             f"{status} {result.file} "
             f"[profile={result.profile}, mode={result.mode}, "
@@ -1344,7 +1356,7 @@ def print_text(results: list[LintResult]) -> None:
             )
     print(
         f"\n{VALIDATOR_NAME} {VALIDATOR_VERSION}: "
-        f"{sum(result.ok for result in results)}/{len(results)} cards passed. "
+        f"{sum(result.passes(warnings_as_errors) for result in results)}/{len(results)} cards passed. "
         "Scope: bounded semantic lint, not official schema validation. "
         "Host rendering was not tested."
     )
@@ -1398,16 +1410,16 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "validator": VALIDATOR_NAME,
                     "validatorVersion": VALIDATOR_VERSION,
-                    "results": [result.to_dict() for result in results],
+                    "results": [
+                        result.to_dict(args.warnings_as_errors) for result in results
+                    ],
                 },
                 indent=2,
             )
         )
     else:
-        print_text(results)
-    has_errors = any(result.errors for result in results)
-    has_warnings = any(result.warnings for result in results)
-    return 1 if has_errors or (args.warnings_as_errors and has_warnings) else 0
+        print_text(results, args.warnings_as_errors)
+    return 0 if all(result.passes(args.warnings_as_errors) for result in results) else 1
 
 
 if __name__ == "__main__":
