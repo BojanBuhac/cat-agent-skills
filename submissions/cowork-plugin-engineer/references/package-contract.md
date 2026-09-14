@@ -95,3 +95,7 @@ For a ZIP supplied without its source project, run
 `scripts/test_cowork_plugin_package.py`. It rejects unsafe archive paths and
 wrapper directories before extraction, applies the same deep package checks,
 and runs Agents Toolkit validation.
+
+`--skip-toolkit-validation` is for local diagnostics when Toolkit execution is
+unavailable. It reports `LocalChecksOnly` and is never a deployable-package
+acceptance result.

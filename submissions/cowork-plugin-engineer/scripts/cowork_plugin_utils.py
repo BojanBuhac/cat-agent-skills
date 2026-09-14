@@ -95,7 +95,12 @@ def print_result(result: dict[str, Any]) -> None:
 def read_json(path: Path, label: str | None = None) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        ValueError,
+        RecursionError,
+    ) as exc:
         raise CoworkPluginError(
             f"{label or path.name} is not valid JSON: {exc}"
         ) from exc
@@ -918,6 +923,13 @@ def validate_project(
         ) from exc
     if parsed_id.int == 0:
         raise CoworkPluginError(f"id must be a non-empty GUID: {manifest_id}")
+
+    name = as_object(get_property(manifest, "name"), "name")
+    required_text(name, "short", "name.short")
+    description = as_object(
+        get_property(manifest, "description"), "description"
+    )
+    required_text(description, "short", "description.short")
 
     developer = as_object(get_property(manifest, "developer"), "developer")
     required_text(developer, "name", "developer.name")

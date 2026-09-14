@@ -22,7 +22,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package-path", required=True)
     parser.add_argument("--allow-oauth-placeholder", action="store_true")
-    parser.add_argument("--skip-toolkit-validation", action="store_true")
+    parser.add_argument(
+        "--skip-toolkit-validation",
+        action="store_true",
+        help=(
+            "Run local checks only. The result is not a deployable-package "
+            "acceptance result."
+        ),
+    )
     parser.add_argument("--max-entries", type=int, default=1000)
     parser.add_argument(
         "--max-extracted-bytes", type=int, default=250 * 1024 * 1024
@@ -70,7 +77,11 @@ def main() -> int:
                     "status": (
                         "DraftNonDeployable"
                         if args.allow_oauth_placeholder
-                        else "Passed"
+                        else (
+                            "LocalChecksOnly"
+                            if args.skip_toolkit_validation
+                            else "Passed"
+                        )
                     ),
                 }
             )
