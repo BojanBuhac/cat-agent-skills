@@ -47,8 +47,7 @@ correct file, ready to be written in Section 1.
 
 ## 1. Generate the file in /app/created/ only
 
-Write the real, complete file beneath `/app/created/` using a descriptive, collision-safe
-filename (topic-based name + a short unique suffix, correct extension for the format used).
+Write the complete file beneath `/app/created/` using a sanitized basename-only, collision-safe filename (topic-based name + a short unique suffix, correct extension for the format used). Before writing, reject `/`, `\\`, `..`, and control characters, resolve the candidate path, and verify it remains under `/app/created/`; use only that validated absolute path for writing and upload.
 
 **This location is not a convention of convenience — it is the only path the Create file
 tool's reference resolution is confirmed to support.** A path under any other directory
