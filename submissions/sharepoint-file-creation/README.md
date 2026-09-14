@@ -13,10 +13,8 @@ This skill gives an agent a fixed, safety-focused workflow:
    is empty or 4,000,000 bytes or larger.
 3. Pass the file path directly to the configured SharePoint **Create file**
    action so the connector resolves the file server-side.
-4. Verify the uploaded size and, where a content-read action is available,
-   compare SHA-256 hashes.
-5. Report the SharePoint destination, measured size, upload result, and actual
-   verification level.
+4. Report the SharePoint destination, measured pre-upload size, and upload
+   result.
 
 ## Why the path and size rules matter
 
@@ -39,14 +37,10 @@ Configure a SharePoint **Create file** action for the agent. Fix the site and
 folder in the action when every upload should use the same destination, or
 leave them available as inputs when the destination must vary.
 
-If the agent can read uploaded file content, also configure a read-only content
-action so the skill can perform byte-level SHA-256 verification. Without one,
-the skill falls back to comparing source and destination metadata sizes.
-
 Review Section 0 of `SKILL.md` and replace or extend the generic content-sourcing
 rules when the agent must use a particular template, knowledge source, report
-structure, schema, or style guide. The upload, size-gating, and verification
-sections should remain unchanged.
+structure, schema, or style guide. The upload and size-gating sections should
+remain unchanged.
 
 ## Boundaries
 
