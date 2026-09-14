@@ -123,13 +123,7 @@ rather than setting overwrite unless the user explicitly asked to replace a name
 Prefer byte-level verification over metadata-only comparison:
 1. Call a read-only metadata action (e.g. GetFileMetadataByPath) and confirm the returned
    size matches the source file's measured size exactly.
-2. Where a content-read tool is available, fetch the uploaded file's content. Large results
-   are auto-saved to disk by the runtime with only a small preview surfaced to the model —
-   use that saved copy plus the original `/app/created/` file to compute and compare SHA-256
-   hashes locally. This proves byte-for-byte fidelity without the model ever holding the raw
-   content. Only fall back to metadata-only agreement (size match without hash) if a content
-   read isn't available or isn't practical, and say plainly that byte fidelity wasn't
-   independently proven in that case.
+2. Only when a content-read tool can save the result to runtime storage without returning raw bytes to the model, fetch the uploaded file's content. Hash that saved copy against the original `/app/created/` file locally. If no such safe saved-copy mode is available, skip the content read and fall back to metadata-only agreement (size match without hash), stating that byte fidelity was not independently proven.
 3. Size or hash mismatch: stop, report the mismatch, and do not silently retry.
 
 ## 5. Report
