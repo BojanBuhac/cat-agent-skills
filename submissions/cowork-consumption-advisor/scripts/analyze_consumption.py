@@ -625,7 +625,7 @@ def analyze(data, args, as_of):
             "totalCredits": total, "prepaidCredits": prepaid, "paygCredits": payg,
             "prepaidShare": pct(prepaid, svc_total) if services else None,
             "listCost": round(list_cost, 2), "estimatedCost": round(est_cost, 2),
-            "activeUsers": (services[0]["activeUsers"] if len(services) == 1 else sum(s["activeUsers"] for s in services)) if services else len(consuming),
+            "activeUsers": len(consuming) if users else (services[0]["activeUsers"] if len(services) == 1 else None),
             "consumingUsers": len(consuming), "creditsPerActiveUser": round(user_total / len(consuming)) if consuming else None,
             "medianCreditsPerUser": median_used, "creditsPerTask": credits_per_task,
             "totalTasks": tasks_total, "scheduledTaskShare": scheduled_share,
