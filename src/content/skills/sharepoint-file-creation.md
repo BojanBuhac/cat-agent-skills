@@ -15,14 +15,13 @@ updatedAt: 2026-09-14
 
 1. Determine what content/format is being asked for and source it (Section 0).
 2. Write the complete file under `/app/created/` only, with a descriptive unique name.
-3. Re-measure the final file's size with the filesystem API. Gate: proceed only if
-   `0 < size_bytes < 4,000,000`. Above that, stop and offer options — do not upload.
+3. Re-measure the final file's size with the filesystem API. Proceed only if
+   `0 < size_bytes < 4,000,000`; otherwise stop and offer options.
 4. Call Create file with the `/app/created/<name>` path bound directly as the content input.
-   Never read bytes into the model to populate it. Never target a path outside
-   `/app/created/`.
+   Never read bytes into the model to populate it or target another directory.
 5. Verify: metadata size match at minimum; prefer a byte-level SHA-256 comparison via a
    saved download when a content-read tool is available.
-6. Report: content source, destination, size, upload result, verification level achieved.
+6. Report: content source, destination, size, upload result, and verification level achieved.
 
 Treat steps 2–6 as fixed; only step 1 is meant to flex per use case.
 
@@ -32,67 +31,44 @@ Apply any configured content-generation rules first, including required template
 knowledge sources, data sources, report structures, schemas, or style guides.
 
 When no more specific rules are configured:
-- Identify the target file type/format from the request (e.g. docx, xlsx, pdf, html, csv,
-  md, txt) and use the runtime library appropriate to that format. Do not default to plain
-  text unless that is genuinely what's being asked for.
-- Identify what the content should be based on: something explicitly referenced in the
-  request (a named document, dataset, or process), something available via whatever
-  retrieval/search/knowledge tools are already configured, or prior conversation context.
-  Use whichever of those is actually available in the current setup.
-- If the request names a source that can't be located, or no source can be identified at
-  all, say so and ask, rather than fabricating plausible-looking but ungrounded content.
+- Identify the requested file format and use the appropriate runtime library. Do not default
+  to plain text unless plain text is requested.
+- Ground the content in the user's request, available retrieval/knowledge tools, or prior
+  conversation context.
+- If a named source cannot be located, or no source can be identified, ask rather than
+  fabricating content.
 
-Whatever the source, the output of this step is the same for every use case: a complete,
-correct file, ready to be written in Section 1.
+Produce a complete, correct file before continuing.
 
 ## 1. Generate the file in /app/created/ only
 
-Write the complete file beneath `/app/created/` using a SharePoint-safe, sanitized basename-only, collision-resistant filename (retain `[A-Za-z0-9_-]` in the stem, replace other runs with `_`, trim separators, and preserve one valid extension). Before writing, reject path separators, `..`, and control characters, resolve the candidate path, and verify it remains under `/app/created/`; use only that validated absolute path for writing and upload.
+Write the complete file beneath `/app/created/` using a SharePoint-safe, sanitized
+basename-only, collision-resistant filename. Retain `[A-Za-z0-9_-]` in the stem, replace
+other runs with `_`, trim separators, and preserve one valid extension. Reject path
+separators, `..`, and control characters; resolve the candidate path and verify it remains
+under `/app/created/` before writing or uploading.
 
-**This location is not a convention of convenience — it is the only path the Create file
-tool's reference resolution is confirmed to support.** A path under any other directory
-(e.g. `/app/workspace/`) is not resolved: the tool instead uploads the *literal text of the
-path string itself* as file content, with no error. That is a silent-corruption failure
-mode, not a clean failure, so treat "write outside /app/created/" as forbidden for anything
-you intend to upload.
+Use `/app/created/` because it is the confirmed path-reference location for Create file.
+Other paths may be uploaded as literal path text instead of file content, causing silent
+corruption.
 
 Keep bytes inside the runtime: never print, preview, or return generated content through the
-model. Track the absolute path, filename, and byte count internally — these are needed to
-bind the upload and run verification — but treat the raw sandbox path (e.g. `/app/created/...`)
-as an internal implementation detail, not user-facing information (see Section 5).
+model. Track the validated path, filename, and byte count internally for upload and
+verification, but do not expose the sandbox path in normal user-facing responses.
 
 ## 2. Measure and gate the size — always on the final written file
 
-After the file is fully written (and closed), re-measure it with the runtime filesystem API
-(`os.path.getsize` / `os.stat().st_size` or equivalent) — never estimate from text length,
-row counts, or token counts, and never trust a size computed before the last write.
+After the file is fully written and closed, measure it with the runtime filesystem API
+(`os.path.getsize`, `os.stat().st_size`, or equivalent). Never estimate from text length,
+row counts, token counts, or a measurement taken before the final write.
 
-Gate at **4,000,000 bytes** by default before attempting any upload call. This number is not
-arbitrary: prior testing (two sessions, two independent connectors — SharePoint `create_file`
-and Azure `CreateblobV2`) found:
-- **4,146,095 bytes** — largest size **confirmed to succeed**.
-- **4,194,304 bytes exactly (4 × 1024 × 1024 = 4 MiB)** — the point at which the tool starts
-  rejecting uploads with `"file too large for inline connector upload (> 4194304 bytes);
-  streamed connector upload is not supported"`.
-- **4,217,157 bytes** — smallest size **confirmed to fail**, with identical error text on both
-  connectors, plus an identical non-native `"verified": false` field in both — evidence this is
-  a shared pre-flight guard in the tool/harness layer, not a native SharePoint/Blob backend
-  limit (both backends natively support much larger files via resumable/chunked APIs the
-  agent's tools do not currently expose).
-- Nothing in the 4,146,096–4,194,303-byte range has actually been tested; do not assume it
-  is safe just because it is below 4,194,304.
+Proceed only when `0 < size_bytes < 4,000,000`. This conservative gate addresses the current
+inline connector/tool upload boundary; it is not a SharePoint file-size limit or a platform
+guarantee.
 
-Treat this threshold as an **empirical, environment-specific observation**, not a documented
-platform guarantee. If an upload unexpectedly fails below the gate, report the measured size
-and exact error. If the requested file cannot be regenerated below the gate without
-compromising the user's requirements, tell the user to report the limitation to the agent
-owner.
-
-If size is 0, unreadable, or ≥ 4,000,000 bytes: do not call Create file. Report the measured
-size plus the gate. Offer concrete options rather than a dead stop — e.g. reduce the
-generated content's scope (fewer rows/sections/pages) and regenerate once with the user's
-explicit go-ahead, or split the content into multiple sequentially named files that each pass
-the gate. Do not truncate or split automatically without the user choosing that path.
+If the file is empty, unreadable, or at least 4,000,000 bytes, do not call Create file.
+Report the measured size and offer to reduce the content or split it into multiple files.
+Do not truncate, regenerate, or split automatically without the user's approval.
 
 ## 3. Hand the reference to SharePoint Create file
 
