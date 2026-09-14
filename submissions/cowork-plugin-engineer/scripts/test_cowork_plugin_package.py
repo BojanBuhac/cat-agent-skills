@@ -67,7 +67,11 @@ def main() -> int:
                         if args.skip_toolkit_validation
                         else ATK_VERSION
                     ),
-                    "status": "Passed",
+                    "status": (
+                        "DraftNonDeployable"
+                        if args.allow_oauth_placeholder
+                        else "Passed"
+                    ),
                 }
             )
         return 0

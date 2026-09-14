@@ -26,13 +26,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     try:
-        project = Path(args.project_path).expanduser().resolve(strict=True)
+        validation = validate_project(args.project_path)
+        project = Path(validation.project_path)
         workflow = project / "m365agents.yml"
         if not workflow.is_file():
             raise CoworkPluginError(
                 f"m365agents.yml is required for atk packaging: {workflow}"
             )
-        validation = validate_project(project)
         manifest = Path(validation.manifest_path)
         output = (
             Path(args.output_path).expanduser()

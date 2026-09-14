@@ -16,6 +16,7 @@ from cowork_plugin_utils import (
     is_oauth_placeholder,
     print_result,
     read_json,
+    validate_project,
     write_json,
 )
 
@@ -33,14 +34,10 @@ def set_oauth_reference(
             "OAuth configuration ID appears to be a placeholder. Use the "
             "generated Teams Developer Portal OAuth client registration ID."
         )
-    project = Path(project_path).expanduser().resolve(strict=True)
-    manifest_path = project / "appPackage" / "manifest.json"
-    if not manifest_path.is_file():
-        manifest_path = project / "manifest.json"
-    if not manifest_path.is_file():
-        raise CoworkPluginError(
-            f"manifest.json was not found under {project}"
-        )
+    validation = validate_project(
+        project_path, allow_oauth_placeholder=True
+    )
+    manifest_path = Path(validation.manifest_path)
     manifest = as_object(read_json(manifest_path, "manifest.json"), "manifest")
     connectors = as_list(get_property(manifest, "agentConnectors"), "agentConnectors")
     matches = [
@@ -68,12 +65,16 @@ def set_oauth_reference(
             f"Connector '{connector_id}' does not use OAuthPluginVault."
         )
     version = get_property(manifest, "version")
+    if not isinstance(version, str):
+        raise CoworkPluginError(
+            "Manifest version must be a semantic-version string."
+        )
+    match = SEMVER_PATTERN.fullmatch(version)
+    if not match:
+        raise CoworkPluginError(
+            f"Manifest version is not semantic: {version}"
+        )
     if not no_version_bump:
-        match = SEMVER_PATTERN.fullmatch(version or "")
-        if not match:
-            raise CoworkPluginError(
-                f"Manifest version is not semantic: {version}"
-            )
         version = (
             f"{match.group(1)}.{match.group(2)}.{int(match.group(3)) + 1}"
         )

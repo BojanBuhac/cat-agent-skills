@@ -33,10 +33,13 @@ as separate gates.
      `tools/list`; never invent tool names or schemas.
    - Read [authentication.md](references/authentication.md).
    - Reject unresolved OAuth placeholders before producing a deployable ZIP.
-6. Run `scripts/test_cowork_plugin.py`.
-7. Build through `scripts/build_cowork_plugin.py`. This uses Microsoft 365
+6. When a source project exists, run `scripts/test_cowork_plugin.py`, then
+   build through `scripts/build_cowork_plugin.py`. This uses Microsoft 365
    Agents Toolkit (`atk`) for both packaging and package validation.
-8. Inspect the final ZIP and return its exact path.
+7. For a ZIP-only request, do not run project validation or rebuild it. Treat
+   the ZIP accepted by `scripts/test_cowork_plugin_package.py` as the final
+   package candidate.
+8. Return the exact path of the built or successfully validated ZIP.
 9. When evaluations are requested, read
    [evaluations.md](references/evaluations.md) and use
    `scripts/new_cowork_plugin_evals.py`. Treat generated cases as drafts until

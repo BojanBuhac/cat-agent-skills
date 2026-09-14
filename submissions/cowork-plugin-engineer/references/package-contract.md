@@ -44,6 +44,8 @@ methods are rejected before extraction.
 
 - At most 20 registered skills.
 - Every `agentSkills[].folder` resolves inside the package.
+- Symbolic links are rejected throughout the package source tree so referenced
+  or companion files cannot escape the package root.
 - The registered folder has a root `SKILL.md`.
 - Frontmatter contains exactly one `name` and one `description`.
 - `name` is lowercase kebab-case and equals the folder leaf.
@@ -63,6 +65,8 @@ methods are rejected before extraction.
   `./tools/file.json` resolve within the package root.
 - The tool-description file exists in the ZIP and contains unique tool names,
   descriptions, and JSON input schemas.
+- Tool names, descriptions, titles, and schemas contain no template
+  placeholders; capture real metadata from MCP `tools/list`.
 - Each tool's `inputSchema` is an object with `type: "object"`. If present,
   `properties` is a mapping of schemas and `required` is an array of unique
   strings. These are local structural checks, not complete JSON Schema

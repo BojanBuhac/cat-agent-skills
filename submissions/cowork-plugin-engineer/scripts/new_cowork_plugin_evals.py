@@ -16,6 +16,7 @@ from cowork_plugin_utils import (
     print_result,
     read_json,
     read_skill_metadata,
+    resolve_output_in_root,
     required_text,
     resolve_in_root,
     validate_project,
@@ -30,16 +31,12 @@ def generate_evaluations(
     force: bool = False,
     dry_run: bool = False,
 ) -> dict[str, object]:
-    project = Path(project_path).expanduser().resolve(strict=True)
-    package_root = (
-        project / "appPackage"
-        if (project / "appPackage").is_dir()
-        else project
+    validation = validate_project(
+        project_path, allow_oauth_placeholder=True
     )
-    manifest_path = package_root / "manifest.json"
-    if not manifest_path.is_file():
-        raise CoworkPluginError(f"manifest.json was not found at {manifest_path}")
-    validate_project(project, allow_oauth_placeholder=True)
+    project = Path(validation.project_path)
+    manifest_path = Path(validation.manifest_path)
+    package_root = manifest_path.parent
     manifest = as_object(read_json(manifest_path, "manifest.json"), "manifest")
     skills = as_list(get_property(manifest, "agentSkills"), "agentSkills")
     connectors = as_list(
@@ -182,11 +179,11 @@ def generate_evaluations(
         "default_evaluators": {"Relevance": {}, "Coherence": {}},
         "items": items,
     }
-    output = (
-        Path(output_path).expanduser()
-        if output_path
-        else project / "evals" / "evals.json"
-    ).resolve(strict=False)
+    output = resolve_output_in_root(
+        project,
+        output_path if output_path else Path("evals") / "evals.json",
+        "Evaluation output path",
+    )
     if output.is_file() and not force:
         raise CoworkPluginError(
             f"Evaluation file already exists. Use --force to replace it: "

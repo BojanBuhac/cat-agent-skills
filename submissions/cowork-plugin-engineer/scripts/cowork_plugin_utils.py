@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import binascii
+import ipaddress
 import json
 import math
 import os
@@ -27,8 +28,21 @@ MAX_OUTLINE_COMPRESSED_BYTES = 1024 * 1024
 PLACEHOLDER_PATTERN = re.compile(
     r"(REPLACE|PLACEHOLDER|YOUR[_-]|<[^>]+>|\{\{.+\}\})", re.IGNORECASE
 )
+MCP_PLACEHOLDER_PATTERN = re.compile(
+    r"\$\{[^{}\r\n]+\}|\{\{.*?\}\}|<[^<>\r\n]+>|\[REPLACE:.*?\]",
+    re.IGNORECASE | re.DOTALL,
+)
+MCP_TEMPLATE_SENTINELS = {
+    "replace_tool_name",
+    "replace with the description returned by mcp tools/list.",
+    "replace tool title",
+}
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SEMVER_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+GUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 FRONTMATTER_PATTERN = re.compile(
     r"\A---\r?\n(?P<frontmatter>.*?)\r?\n---(?:\r?\n|$)", re.DOTALL
 )
@@ -81,7 +95,7 @@ def print_result(result: dict[str, Any]) -> None:
 def read_json(path: Path, label: str | None = None) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise CoworkPluginError(
             f"{label or path.name} is not valid JSON: {exc}"
         ) from exc
@@ -121,10 +135,51 @@ def as_list(value: Any, label: str) -> list[Any]:
     return value
 
 
-def validate_https(value: str, label: str) -> None:
+def _parse_https(value: str) -> Any:
+    if (
+        not isinstance(value, str)
+        or any(character.isspace() or ord(character) < 32 for character in value)
+        or "\\" in value
+    ):
+        raise ValueError("URL contains invalid characters")
     parsed = urlparse(value)
-    if parsed.scheme.lower() != "https" or not parsed.netloc:
-        raise CoworkPluginError(f"{label} must use HTTPS: {value}")
+    hostname = parsed.hostname
+    port = parsed.port
+    if (
+        parsed.scheme.lower() != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or "%" in parsed.netloc
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        raise ValueError("URL authority is invalid")
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        ascii_hostname = hostname.rstrip(".").encode("idna").decode("ascii")
+        if (
+            not ascii_hostname
+            or len(ascii_hostname) > 253
+            or any(
+                not re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?",
+                    label,
+                )
+                for label in ascii_hostname.split(".")
+            )
+        ):
+            raise ValueError("URL hostname is invalid")
+    return parsed
+
+
+def validate_https(value: str, label: str) -> None:
+    try:
+        _parse_https(value)
+    except (UnicodeError, ValueError) as exc:
+        raise CoworkPluginError(
+            f"{label} must be a valid HTTPS URL without credentials."
+        ) from exc
 
 
 def normalize_manifest_path(relative_path: str, label: str) -> PurePosixPath:
@@ -179,6 +234,114 @@ def is_oauth_placeholder(value: str, connector_id: str | None = None) -> bool:
         connector_id
         and value.lower().endswith(f"-{connector_id}-auth".lower())
     )
+
+
+def contains_placeholder(value: Any) -> bool:
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    visited = 0
+    while stack:
+        item, depth = stack.pop()
+        visited += 1
+        if depth > 100 or visited > 10_000:
+            raise CoworkPluginError(
+                "Tool metadata exceeds the validation nesting or size limit."
+            )
+        if isinstance(item, str):
+            if (
+                item.strip().casefold() in MCP_TEMPLATE_SENTINELS
+                or MCP_PLACEHOLDER_PATTERN.search(item)
+            ):
+                return True
+        elif isinstance(item, dict):
+            stack.extend((key, depth + 1) for key in item)
+            stack.extend((nested, depth + 1) for nested in item.values())
+        elif isinstance(item, list):
+            stack.extend((nested, depth + 1) for nested in item)
+    return False
+
+
+def _is_link_like(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise CoworkPluginError(
+            f"Cannot inspect package path without following links: {path}"
+        ) from exc
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        attributes & reparse_point
+    )
+
+
+def _reject_symlinks(root: Path) -> None:
+    if _is_link_like(root):
+        raise CoworkPluginError(
+            f"Package root must not be a link or reparse point: {root}"
+        )
+    directories = [root]
+    while directories:
+        directory = directories.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    path = Path(entry.path)
+                    if _is_link_like(path):
+                        raise CoworkPluginError(
+                            "Package content must not contain links or "
+                            f"reparse points: {path}"
+                        )
+                    metadata = entry.stat(follow_symlinks=False)
+                    if stat.S_ISDIR(metadata.st_mode):
+                        directories.append(path)
+        except CoworkPluginError:
+            raise
+        except OSError as exc:
+            raise CoworkPluginError(
+                f"Cannot safely inspect package directory: {directory}"
+            ) from exc
+
+
+def resolve_output_in_root(
+    root: Path, output_path: str | Path, label: str
+) -> Path:
+    resolved_root = root.resolve(strict=True)
+    requested = Path(output_path).expanduser()
+    candidate = (
+        requested
+        if requested.is_absolute()
+        else resolved_root / requested
+    ).absolute()
+    try:
+        lexical_relative = candidate.relative_to(resolved_root)
+    except ValueError as exc:
+        raise CoworkPluginError(
+            f"{label} must remain inside the project: {output_path}"
+        ) from exc
+    resolved_candidate = candidate.resolve(strict=False)
+    try:
+        resolved_candidate.relative_to(resolved_root)
+    except ValueError as exc:
+        raise CoworkPluginError(
+            f"{label} must remain inside the project: {output_path}"
+        ) from exc
+
+    current = resolved_root
+    for part in lexical_relative.parts:
+        current /= part
+        try:
+            current.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise CoworkPluginError(
+                f"Cannot safely inspect {label}: {current}"
+            ) from exc
+        if _is_link_like(current):
+            raise CoworkPluginError(
+                f"{label} must not traverse a link or reparse point: {current}"
+            )
+    return resolved_candidate
 
 
 def _frontmatter_field(
@@ -702,15 +865,27 @@ def validate_project(
     *,
     package_root_only: bool = False,
 ) -> ValidationResult:
-    project = Path(project_path).expanduser().resolve(strict=True)
+    project_input = Path(project_path).expanduser().absolute()
+    if _is_link_like(project_input):
+        raise CoworkPluginError(
+            f"Project path must not be a link or reparse point: {project_input}"
+        )
+    project = project_input.resolve(strict=True)
     if not project.is_dir():
         raise CoworkPluginError(f"Project path is not a directory: {project}")
     app_package = project / "appPackage"
+    if not package_root_only and app_package.exists() and _is_link_like(
+        app_package
+    ):
+        raise CoworkPluginError(
+            f"appPackage must not be a link or reparse point: {app_package}"
+        )
     package_root = (
         app_package
         if not package_root_only and app_package.is_dir()
         else project
     )
+    _reject_symlinks(package_root)
     manifest_path = package_root / "manifest.json"
     if not manifest_path.is_file():
         raise CoworkPluginError(f"manifest.json was not found at {manifest_path}")
@@ -731,6 +906,10 @@ def validate_project(
             f"version must use three numeric parts: {version}"
         )
     manifest_id = required_text(manifest, "id", "id")
+    if not GUID_PATTERN.fullmatch(manifest_id):
+        raise CoworkPluginError(
+            "id must use canonical 8-4-4-4-12 GUID format."
+        )
     try:
         parsed_id = uuid.UUID(manifest_id)
     except ValueError as exc:
@@ -908,7 +1087,14 @@ def validate_project(
             tool_name = required_text(
                 tool, "name", f"connector '{connector_id}' tool name"
             )
-            required_text(tool, "description", f"tool '{tool_name}' description")
+            required_text(
+                tool, "description", f"tool '{tool_name}' description"
+            )
+            if contains_placeholder(tool):
+                raise CoworkPluginError(
+                    f"Tool '{tool_name}' contains unresolved placeholder "
+                    "metadata. Replace it with the MCP tools/list result."
+                )
             input_schema = as_object(
                 get_property(tool, "inputSchema"),
                 f"Tool '{tool_name}' inputSchema",
@@ -1033,6 +1219,11 @@ def validate_project(
             skills=package_result.skills,
             connectors=package_result.connectors,
             package_checked=True,
+            status=(
+                "DraftNonDeployable"
+                if allow_oauth_placeholder
+                else "Passed"
+            ),
         )
 
     return ValidationResult(
@@ -1043,6 +1234,9 @@ def validate_project(
         skills=len(skills),
         connectors=len(connectors),
         package_checked=False,
+        status=(
+            "DraftNonDeployable" if allow_oauth_placeholder else "Passed"
+        ),
     )
 
 
@@ -1284,13 +1478,15 @@ def _atk_registry() -> str:
     registry = os.environ.get(
         "COWORK_ATK_REGISTRY", DEFAULT_ATK_REGISTRY
     ).strip()
-    parsed = urlparse(registry)
+    try:
+        parsed = _parse_https(registry)
+    except (UnicodeError, ValueError) as exc:
+        raise CoworkPluginError(
+            "COWORK_ATK_REGISTRY must be an HTTPS registry URL without "
+            "credentials, a query, or a fragment."
+        ) from exc
     if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username
-        or parsed.password
-        or parsed.query
+        parsed.query
         or parsed.fragment
     ):
         raise CoworkPluginError(
