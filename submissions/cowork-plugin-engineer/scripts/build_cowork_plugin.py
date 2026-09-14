@@ -20,7 +20,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-path", required=True)
     parser.add_argument("--output-path")
-    parser.add_argument("--atk-version", default=ATK_VERSION)
     return parser
 
 
@@ -51,13 +50,11 @@ def main() -> int:
                 "--output-folder",
                 str(output.parent),
             ],
-            args.atk_version,
-            cwd=project,
+            excluded_roots=(project,),
         )
         run_atk(
             ["validate", "--package-file", str(output)],
-            args.atk_version,
-            cwd=project,
+            excluded_roots=(project,),
         )
         validate_project(project, package_path=output)
         print_result(
@@ -65,7 +62,7 @@ def main() -> int:
                 "project_path": str(project),
                 "package_path": str(output),
                 "bytes": output.stat().st_size,
-                "atk_version": args.atk_version,
+                "atk_version": ATK_VERSION,
                 "status": "Passed",
             }
         )

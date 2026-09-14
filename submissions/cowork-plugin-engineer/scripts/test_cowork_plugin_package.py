@@ -21,7 +21,6 @@ from cowork_plugin_utils import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package-path", required=True)
-    parser.add_argument("--atk-version", default=ATK_VERSION)
     parser.add_argument("--allow-oauth-placeholder", action="store_true")
     parser.add_argument("--skip-toolkit-validation", action="store_true")
     parser.add_argument("--max-entries", type=int, default=1000)
@@ -51,7 +50,7 @@ def main() -> int:
             if not args.skip_toolkit_validation:
                 run_atk(
                     ["validate", "--package-file", str(package)],
-                    args.atk_version,
+                    excluded_roots=(extraction_root,),
                 )
             print_result(
                 {
@@ -66,7 +65,7 @@ def main() -> int:
                     "atk_version": (
                         None
                         if args.skip_toolkit_validation
-                        else args.atk_version
+                        else ATK_VERSION
                     ),
                     "status": "Passed",
                 }

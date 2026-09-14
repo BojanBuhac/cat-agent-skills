@@ -5,8 +5,8 @@ from __future__ import annotations
 import binascii
 import json
 import math
+import os
 import re
-import shutil
 import stat
 import struct
 import subprocess
@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 
 ATK_VERSION = "1.1.15"
+DEFAULT_ATK_REGISTRY = "https://registry.npmjs.org/"
 MAX_PNG_BYTES = 5 * 1024 * 1024
 MAX_OUTLINE_COMPRESSED_BYTES = 1024 * 1024
 PLACEHOLDER_PATTERN = re.compile(
@@ -1189,22 +1190,74 @@ def inspect_zip(
     return len(validated), actual_total
 
 
-def find_npx_command() -> list[str]:
-    npx = shutil.which("npx")
-    if not npx:
-        raise CoworkPluginError(
-            "npx is required to run Microsoft 365 Agents Toolkit."
-        )
-    npx_path = Path(npx).resolve()
-    if npx_path.suffix.lower() not in (".cmd", ".bat"):
-        return [str(npx_path)]
+def _is_within(path: Path, roots: Iterable[Path]) -> bool:
+    resolved = path.resolve(strict=False)
+    for root in roots:
+        try:
+            resolved.relative_to(root.resolve(strict=False))
+            return True
+        except ValueError:
+            continue
+    return False
 
-    node = shutil.which("node")
-    if not node:
+
+def _safe_path_directories(excluded_roots: Iterable[Path]) -> list[Path]:
+    excluded = [Path.cwd(), *excluded_roots]
+    directories: list[Path] = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if not entry:
+            continue
+        directory = Path(entry).expanduser()
+        if not directory.is_absolute():
+            continue
+        resolved = directory.resolve(strict=False)
+        if _is_within(resolved, excluded):
+            continue
+        directories.append(resolved)
+    return directories
+
+
+def _find_executable(name: str, directories: Iterable[Path]) -> Path | None:
+    suffixes = [""]
+    if os.name == "nt" and not Path(name).suffix:
+        suffixes = [
+            suffix.lower()
+            for suffix in os.environ.get(
+                "PATHEXT", ".COM;.EXE;.BAT;.CMD"
+            ).split(os.pathsep)
+            if suffix
+        ]
+    for directory in directories:
+        for suffix in suffixes:
+            candidate = directory / f"{name}{suffix}"
+            if candidate.is_file() and (
+                os.name == "nt" or os.access(candidate, os.X_OK)
+            ):
+                return candidate.resolve(strict=True)
+    return None
+
+
+def find_npx_command(
+    excluded_roots: Iterable[Path] = (),
+) -> tuple[list[str], str]:
+    safe_directories = _safe_path_directories(excluded_roots)
+    safe_path = os.pathsep.join(str(path) for path in safe_directories)
+    npx_path = _find_executable("npx", safe_directories)
+    if npx_path is None:
         raise CoworkPluginError(
-            "node is required to run Microsoft 365 Agents Toolkit."
+            "npx must be available from an absolute, trusted PATH directory "
+            "to run Microsoft 365 Agents Toolkit."
         )
-    node_path = Path(node).resolve()
+    if npx_path.suffix.lower() not in (".cmd", ".bat"):
+        return [str(npx_path)], safe_path
+
+    node_path = _find_executable("node", safe_directories)
+    if node_path is None:
+        raise CoworkPluginError(
+            "node must be available from an absolute, trusted PATH directory "
+            "to run Microsoft 365 Agents Toolkit."
+        )
     if node_path.suffix.lower() in (".cmd", ".bat"):
         raise CoworkPluginError(
             "A native node executable is required; Windows batch launchers "
@@ -1224,21 +1277,85 @@ def find_npx_command() -> list[str]:
             "Cannot locate npx-cli.js without using the unsafe Windows "
             "command wrapper."
         )
-    return [str(node_path), str(npx_cli)]
+    return [str(node_path), str(npx_cli.resolve(strict=True))], safe_path
 
 
-def run_atk(arguments: list[str], atk_version: str, cwd: Path | None = None) -> None:
-    package_name = f"@microsoft/m365agentstoolkit-cli@{atk_version}"
-    command = [*find_npx_command(), "--yes", package_name, *arguments]
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=cwd,
-            check=False,
-            shell=False,
+def _atk_registry() -> str:
+    registry = os.environ.get(
+        "COWORK_ATK_REGISTRY", DEFAULT_ATK_REGISTRY
+    ).strip()
+    parsed = urlparse(registry)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise CoworkPluginError(
+            "COWORK_ATK_REGISTRY must be an HTTPS registry URL without "
+            "credentials, a query, or a fragment."
         )
-    except OSError as exc:
-        raise CoworkPluginError(f"Cannot start npx: {exc}") from exc
+    return registry.rstrip("/") + "/"
+
+
+def run_atk(
+    arguments: list[str],
+    excluded_roots: Iterable[Path] = (),
+) -> None:
+    excluded = tuple(excluded_roots)
+    npx_command, safe_path = find_npx_command(excluded)
+    registry = _atk_registry()
+    package_name = f"@microsoft/m365agentstoolkit-cli@{ATK_VERSION}"
+    with temporary_workspace(".cowork-plugin-atk-") as workspace_name:
+        workspace = Path(workspace_name)
+        npm_config = (
+            f"registry={registry}\n"
+            f"@microsoft:registry={registry}\n"
+            "ignore-scripts=true\n"
+        )
+        project_config = workspace / ".npmrc"
+        user_config = workspace / "user.npmrc"
+        global_config = workspace / "global.npmrc"
+        for config in (project_config, user_config, global_config):
+            config.write_text(npm_config, encoding="utf-8", newline="\n")
+
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.lower().startswith("npm_config_")
+            and key.upper() not in {"NODE_OPTIONS", "NODE_PATH", "INIT_CWD"}
+        }
+        environment.update(
+            {
+                "PATH": safe_path,
+                "NPM_CONFIG_USERCONFIG": str(user_config),
+                "NPM_CONFIG_GLOBALCONFIG": str(global_config),
+                "NPM_CONFIG_CACHE": str(workspace / "npm-cache"),
+                "NPM_CONFIG_REGISTRY": registry,
+                "NPM_CONFIG_IGNORE_SCRIPTS": "true",
+            }
+        )
+        command = [
+            *npx_command,
+            "--yes",
+            "--ignore-scripts",
+            f"--package={package_name}",
+            "--",
+            "atk",
+            *arguments,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=workspace,
+                env=environment,
+                check=False,
+                shell=False,
+            )
+        except OSError as exc:
+            raise CoworkPluginError(f"Cannot start npx: {exc}") from exc
     if completed.returncode:
         operation = arguments[0] if arguments else "command"
         raise CoworkPluginError(

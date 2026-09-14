@@ -87,8 +87,8 @@ Pay particular attention to:
 
 ### 5. Update the Agents Toolkit baseline only when required
 
-Review the shared `ATK_VERSION` constant in `scripts/cowork_plugin_utils.py`,
-the `--atk-version` defaults that import it, and the pinned import command in:
+Review the shared `ATK_VERSION` constant in `scripts/cowork_plugin_utils.py`
+and the pinned import command in:
 
 ```text
 scripts/build_cowork_plugin.py
@@ -132,8 +132,8 @@ Run:
 
 ```sh
 python3 scripts/test_cowork_plugin.py --project-path <fixture>
-python3 scripts/build_cowork_plugin.py --project-path <fixture> --atk-version <VERIFIED-TOOLKIT-VERSION>
-python3 scripts/test_cowork_plugin_package.py --package-path <fixture.zip> --atk-version <VERIFIED-TOOLKIT-VERSION>
+python3 scripts/build_cowork_plugin.py --project-path <fixture>
+python3 scripts/test_cowork_plugin_package.py --package-path <fixture.zip>
 python3 scripts/new_cowork_plugin_evals.py --project-path <fixture> --force
 ```
 

@@ -37,6 +37,10 @@ automation, the host or development machine needs:
 - Network access when Microsoft 365 Agents Toolkit validation is requested.
 - A local plugin project or plugin ZIP for validation.
 
+Toolkit downloads use `https://registry.npmjs.org/` by default and ignore
+project, user, and global npm configuration. Environments that require an
+approved HTTPS registry mirror can set `COWORK_ATK_REGISTRY` to that URL.
+
 Authenticated MCP connectors can also require a Microsoft Entra application,
 Teams Developer Portal OAuth configuration, user or administrator consent, and
 server-side allowed-client configuration.
