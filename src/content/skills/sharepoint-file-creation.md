@@ -19,11 +19,9 @@ updatedAt: 2026-09-14
    `0 < size_bytes < 4,000,000`; otherwise stop and offer options.
 4. Call Create file with the `/app/created/<name>` path bound directly as the content input.
    Never read bytes into the model to populate it or target another directory.
-5. Verify: metadata size match at minimum; prefer a byte-level SHA-256 comparison via a
-   saved download when a content-read tool is available.
-6. Report: content source, destination, size, upload result, and verification level achieved.
+5. Report: content source, destination, measured size, and upload result.
 
-Treat steps 2–6 as fixed; only step 1 is meant to flex per use case.
+Treat steps 2–5 as fixed; only step 1 is meant to flex per use case.
 
 ## 0. Determine and source the content
 
@@ -53,8 +51,8 @@ Other paths may be uploaded as literal path text instead of file content, causin
 corruption.
 
 Keep bytes inside the runtime: never print, preview, or return generated content through the
-model. Track the validated path, filename, and byte count internally for upload and
-verification, but do not expose the sandbox path in normal user-facing responses.
+model. Track the validated path, filename, and byte count internally for upload, but do not
+expose the sandbox path in normal user-facing responses.
 
 ## 2. Measure and gate the size — always on the final written file
 
@@ -94,36 +92,25 @@ anything sensitive.
 Never overwrite an existing file; if the chosen filename collides, generate a new unique name
 rather than setting overwrite unless the user explicitly asked to replace a named file.
 
-## 4. Verify after upload
+## 4. Report
 
-Prefer byte-level verification over metadata-only comparison:
-1. Call a read-only metadata action (e.g. GetFileMetadataByPath) and confirm the returned
-   size matches the source file's measured size exactly.
-2. Only when a content-read tool can save the result to runtime storage without returning raw bytes to the model, fetch the uploaded file's content. Hash that saved copy against the original `/app/created/` file locally. If no such safe saved-copy mode is available, skip the content read and fall back to metadata-only agreement (size match without hash), stating that byte fidelity was not independently proven.
-3. Size or hash mismatch: stop, report the mismatch, and do not silently retry.
-
-## 5. Report
-
-State clearly: what was generated (type, content source), the destination in SharePoint
-(site/library/folder path or URL, and filename), the measured size, whether the upload
-succeeded, and the verification level actually achieved (byte-hash-verified vs.
-metadata-size-only vs. unverified). Never claim an upload succeeded without tool evidence, and
-never claim byte-level integrity without an actual hash match.
+State clearly: what was generated (type and content source), the destination in SharePoint
+(site/library/folder path or URL and filename), the measured size, and the upload result.
+Never claim an upload succeeded without tool evidence.
 
 **Do not surface the internal sandbox path** (e.g. `/app/created/<name>`) in a normal
 user-facing report — it is a runtime implementation detail, not something a user asking to
-"generate and upload a file" needs or expects to see, and exposing it looks like an internal
-leak rather than useful information. Refer to the file by its name only, plus where it landed
-in SharePoint. Only include the raw sandbox path when the user is explicitly debugging or
-testing the skill itself (e.g. developing/validating this skill, as opposed to using its
-end result), and say so if asked directly.
+"generate and upload a file" needs or expects to see. Refer to the file by its name only,
+plus where it landed in SharePoint. Only include the raw sandbox path when the user is
+explicitly debugging or testing the skill itself, and say so if asked directly.
 
-## 6. Failure handling
+## 5. Failure handling
 
-- Permission/DLP/authentication/unsupported-operation errors: stop and report; not a sizing
-  issue, don't reinterpret it as one.
-- Size-boundary errors even under the 4,000,000-byte gate: stop, report the exact error text
-  and byte count, and treat it as new evidence the threshold needs tightening — do not retry
-  with a slightly smaller guess. Communicate it to the user as you having hit a limitation and that they should reach out to the agent owner to report the issue.
-- Ambiguous/timeout outcomes: check destination metadata if possible; otherwise report the
-  outcome as unknown. Never blindly retry a write whose outcome is unclear.
+- Permission/DLP/authentication/unsupported-operation errors: stop and report; these are not
+  sizing issues, so do not reinterpret them as such.
+- Size-boundary errors even under the 4,000,000-byte gate: stop and report the exact error
+  text and byte count. Treat this as evidence that the threshold may need tightening; do not
+  retry with a slightly smaller guess. Tell the user to contact the agent owner to report the
+  limitation.
+- Ambiguous or timeout outcomes: report the upload result as unknown. Never blindly retry a
+  write whose outcome is unclear.
