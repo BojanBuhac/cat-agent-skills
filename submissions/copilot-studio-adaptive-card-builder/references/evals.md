@@ -68,6 +68,13 @@ that input, including actions in an `ActionSet`. Renaming the input and updating
 its mapping must resolve the error. An explicit escape action that collects no
 inputs must not produce a merge-collision error.
 
+For wiring, supply an old or different card's payload with the same short
+`actionId` as the currently awaited card. Require exact matching of both
+`cardId` and `actionSubmitId` against trusted active card/version state before
+branching. Reject the stale/cross-card payload without invoking work. Repeat
+with missing identity fields and an already-consumed submission. A matching
+identity still requires downstream authorization; it is not proof of permission.
+
 ### 8. Unsupported action
 
 **Prompt:** "Use Action.Execute because the card targets Web Chat."
@@ -115,10 +122,15 @@ or toggle title. Benign prompts such as "Enter access token status", "API key
 label", "Tokenizer", and "Secretary" must not trigger that diagnostic.
 
 Repeat with `secretToken`, `secret_token`, and "Paste your secret token".
-Expect rejection through the explicit "secret token" vocabulary entry, including
-separator variants in action-data keys. Confirm `tokenCount`, `keywords`,
+Expect rejection through contiguous secret-token matching in input text,
+including ordinary prompts "Enter API token to continue", "Password confirmation",
+and "secret token input". Keep exact normalized action-data key scanning.
+Confirm `tokenCount`, `keywords`,
 `passwordPolicyUrl`, `secretSantaName`, `accessLevel`, and `keyFindings` remain
-allowed rather than broadening the matcher to arbitrary substrings.
+allowed through documented benign phrases or intact lexical tokens, not a
+context-word stripping list. `secretTokenStatus` is an explicit status-only
+exception; a placeholder asking for the token must still fail. "Token count
+and password" must fail even though it contains a benign phrase.
 
 ### 12. Destructive action
 
@@ -184,6 +196,10 @@ missing error message, hidden input, or identical on and off values.
 **Expected:** Return boundary and assumptions, card JSON, sample data where useful, input and action mappings, wiring, validation result, accessibility notes, fallback, and channel test checklist.
 
 **Failure:** Returns only card JSON.
+
+Check every template catalog output against actual input IDs and submit data.
+The confirmation output is `confirmDetails`; the intake form also exposes
+`requestDetails`. Do not invent or silently rename outputs when creating mappings.
 
 ### 19. No execution surface
 

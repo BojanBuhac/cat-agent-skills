@@ -132,28 +132,58 @@ SECRET_FIELD_TERMS = {
 NORMALIZED_SECRET_FIELD_TERMS = {
     normalize_sensitive_name(term) for term in SECRET_FIELD_TERMS
 }
-INPUT_ID_CONTEXT_TOKENS = {"field", "input", "value"}
-INPUT_LABEL_CONTEXT_TOKENS = {
-    "a",
-    "an",
-    "confirm",
-    "current",
-    "enter",
-    "field",
-    "here",
-    "new",
-    "old",
-    "optional",
-    "paste",
-    "please",
-    "provide",
-    "repeat",
-    "required",
-    "the",
-    "this",
-    "value",
-    "your",
+BENIGN_INPUT_PHRASES = {
+    "token count",
+    "password policy",
+    "secret santa name",
+    "secret tokenizer",
+    "credential type",
+    "access token status",
+    "api key label",
+    "signing key status",
+    "connection string format",
+    "secret token status",
+    "secret token label",
 }
+
+
+def token_sequences(phrases: Iterable[str]) -> set[tuple[str, ...]]:
+    return {
+        sequence
+        for phrase in phrases
+        for sequence in (
+            tuple(tokenize_sensitive_name(phrase)),
+            (normalize_sensitive_name(phrase),),
+        )
+    }
+
+
+SECRET_INPUT_SEQUENCES = token_sequences(SECRET_FIELD_TERMS)
+BENIGN_INPUT_SEQUENCES = token_sequences(BENIGN_INPUT_PHRASES)
+
+
+def matching_token_spans(
+    tokens: tuple[str, ...], sequences: set[tuple[str, ...]]
+) -> list[tuple[int, int]]:
+    lengths = sorted({len(sequence) for sequence in sequences})
+    return [
+        (start, start + length)
+        for start in range(len(tokens))
+        for length in lengths
+        if start + length <= len(tokens) and tokens[start:start + length] in sequences
+    ]
+
+
+def is_sensitive_input_text(value: str) -> bool:
+    tokens = tuple(tokenize_sensitive_name(value))
+    benign_spans = matching_token_spans(tokens, BENIGN_INPUT_SEQUENCES)
+    # Exempt only the matched benign phrase, never the whole prompt or field.
+    return any(
+        not any(left <= start and end <= right for left, right in benign_spans)
+        for start, end in matching_token_spans(tokens, SECRET_INPUT_SEQUENCES)
+    )
+
+
 SECRET_VALUE_PATTERNS = (
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}", re.IGNORECASE),
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
@@ -1176,22 +1206,12 @@ class CardLinter:
             )
 
     def _check_secret_field(self, element: dict[str, Any], path: str) -> None:
-        # Placeholders, error messages, and toggle titles prompt users like labels,
-        # so share the bounded label context words, not the identifier token set.
-        candidates = (
-            (element.get("id"), INPUT_ID_CONTEXT_TOKENS),
-            *((element.get(key), INPUT_LABEL_CONTEXT_TOKENS)
-              for key in ("label", "placeholder", "errorMessage", "title")),
-        )
         is_sensitive = any(
-            isinstance(value, str)
-            and "".join(
-                token
-                for token in tokenize_sensitive_name(value)
-                if token not in context_tokens
+            isinstance(value, str) and is_sensitive_input_text(value)
+            for value in (
+                element.get(key)
+                for key in ("id", "label", "placeholder", "errorMessage", "title")
             )
-            in NORMALIZED_SECRET_FIELD_TERMS
-            for value, context_tokens in candidates
         )
         if is_sensitive:
             self.error(

@@ -75,7 +75,7 @@ python scripts/validate_cards.py card.json --profile teams-1.5 --mode interactiv
 
 Machine-readable output is available with `--format json`. Add `--warnings-as-errors` for a stricter quality gate: warnings then produce `FAIL` in text, `ok: false` in JSON results, and a nonzero exit code. Diagnostics retain their original warning severity.
 
-Run the 57 regression tests and strict template lint from the same skill directory:
+Run the 67 regression tests and strict template lint from the same skill directory:
 
 ```shell
 python -B -m unittest discover -s scripts/tests -p "test_*.py"
@@ -117,8 +117,10 @@ For accessibility, Microsoft recommends input `label` properties, `isRequired` a
 * Keep cards concise. Prefer a single-column layout for forms and mobile use.
 * Cards collect and present data. They do not authorize a user or enforce a business transaction.
 * Validate permissions and business rules again in the downstream topic, flow, connector, or API.
+* Before branching, match the exact expected `cardId` and `actionSubmitId` for the currently awaited card/version from trusted conversation state. `actionId` alone cannot distinguish stale or cross-card submissions.
 * Keep input IDs distinct from every top-level `data` key on submit actions that collect inputs. Submitted input values can overwrite action metadata with the same key.
 * Secret-collection checks inspect input IDs, labels, placeholders, error messages, and toggle titles, not only the field name.
+* Secret phrases are detected anywhere in input text, with only explicit benign-phrase exceptions. The bundled `references/host-profiles-and-contracts.md` lists every exception, intentional conservative flags, and how to request an exception.
 * The approval template keeps its review comment optional so Approve is not blocked. Downstream topic logic must require a nonblank trimmed comment for Reject or Request changes, and reprompt without recording the decision when it is blank.
 * External images are excluded from the bundled profile by default.
 * Never use card data as a place to hide credentials or authorization decisions.

@@ -113,7 +113,14 @@ Every `Action.Submit` must have a descriptive title and a `data` object containi
 }
 ```
 
-Keep each `actionSubmitId` unique. Downstream logic must validate the action identity before acting.
+Keep each `actionSubmitId` unique to its button and card version. Before
+branching, require the exact expected `cardId` and `actionSubmitId` for the
+currently awaited card/version, using trusted conversation state rather than
+values supplied by the client. The version is part of the package's versioned
+card identity, not the Adaptive Cards schema version. Reject missing, unknown,
+cross-card, expired, or already-consumed submissions without invoking work.
+Only after that gate may `actionId` select the already-validated branch; never
+accept it alone. Identity matching does not replace downstream authorization.
 
 Keep input IDs distinct from every top-level `data` key on submit actions that
 collect inputs. Associated input values can overwrite same-named action data,
@@ -203,7 +210,7 @@ For an interactive card:
 2. Paste the JSON literal, or switch the node to **Formula** and insert the Power Fx version.
 3. Save the designer so Copilot Studio creates output variables from input IDs.
 4. Review the generated output schema and correct types with **Edit Schema** when needed.
-5. Add a condition on `actionSubmitId` or `actionId`.
+5. Require the exact expected `cardId` and `actionSubmitId` for the currently awaited card/version from trusted conversation state before branching; reject stale, unknown, or mismatched identities without invoking work.
 6. Map each input ID to the named downstream topic variable.
 7. Revalidate required data, authorization, stale submissions, and business rules.
 8. Call the tool, flow, or handoff only after those checks.
@@ -215,7 +222,10 @@ For an informational card:
 2. Add an Adaptive Card and paste the JSON.
 3. Do not use an Ask with Adaptive Card node without a submit action.
 
-For consecutive or retried interactive cards, validate unique submit data and protect downstream processing from stale or duplicate clicks.
+For consecutive or retried interactive cards, track which card instance is
+currently awaited and consume a successful submission only once. Distinguish
+reissued instances with fresh submit identities or a downstream freshness
+check; matching the static template's identifiers alone cannot detect replays.
 
 ### 7. Apply accessibility and mobile checks
 

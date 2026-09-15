@@ -56,8 +56,8 @@ This subset is not the full Adaptive Cards schema. A type outside it can be vali
 |---|---|---|---|
 | `welcome-starter-prompts.json` | Interactive | Start a conversation with three stable intents | `actionSubmitId`, `intent` |
 | `information-summary.json` | Informational | Present a concise record or decision summary | None |
-| `data-collection-form.json` | Interactive | Collect text, category, and due date | `requestTitle`, `requestCategory`, `requestedDate` |
-| `confirmation.json` | Interactive | Confirm or go back before a consequential step | `confirmed`, action identity |
+| `data-collection-form.json` | Interactive | Collect text, category, and due date | `requestTitle`, `requestCategory`, `requestedDate`, `requestDetails` |
+| `confirmation.json` | Interactive | Confirm or go back before a consequential step | `confirmDetails`, action identity |
 | `approval-decision.json` | Interactive | Approve, reject, or request changes; comment is optional for approval and downstream-required for rejection or changes | `reviewComment`, action identity |
 | `choice-disambiguation.json` | Interactive | Resolve one ambiguous request from a controlled list | `selectedOption`, action identity |
 | `status-progress.json` | Informational | Show current state, owner, and next step | None |
@@ -128,7 +128,8 @@ action:
     intent: approval.approve
     riskLevel: consequential
   downstream_branch:
-    condition: actionSubmitId equals approval_decision_v1_approve
+    condition: cardId equals approval_decision_v1 AND actionSubmitId equals approval_decision_v1_approve
+    expected_identity_source: trusted state for the currently awaited card/version
     authorization_check: required
     stale_submission_check: required
     duplicate_submission_check: required
@@ -136,6 +137,19 @@ action:
 ```
 
 `actionSubmitId` identifies one button on one card version. `actionId` is a short stable branch key. `intent` gives a readable machine contract.
+
+Never branch on `actionId` alone. Before selecting a branch or invoking any work,
+match both `cardId` and `actionSubmitId` exactly against the currently awaited
+card/version recorded in trusted conversation state. Versioned template IDs
+such as `approval_decision_v1` express package identity, not schema version.
+Reject missing, unknown, cross-card, expired, or consumed identities; do not
+fall back to the short action key. Validate any additional action fields against
+the same expected contract. Client-supplied identity is not authorization.
+
+For retries or repeated cards with the same static template, issue fresh submit
+identities or enforce a separate downstream instance/freshness check. Track the
+active instance and consume it once; matching static IDs alone is not replay
+protection.
 
 No input ID may equal a top-level `data` key on a submit action that collects
 inputs. This applies to every key, not just the five required contract fields.
@@ -159,8 +173,8 @@ Adaptive Card native validation applies to the card submission, not selectively
 to individual submit actions. Do not set `reviewComment` as card-required in the
 approval template, because that would also block Approve.
 
-After matching the submitted action against the trusted expected
-`actionSubmitId`:
+After matching the submitted `cardId` and `actionSubmitId` against the trusted
+expected identity for the currently awaited card/version:
 
 * **Approve:** `reviewComment` can be blank.
 * **Reject:** trim `reviewComment`; if blank, reprompt and do not record or invoke the decision.
@@ -229,20 +243,54 @@ Reject or redesign a card that:
 * treats a hidden field as tamper-proof.
 
 Inspect input IDs and all visible input prompts: labels, placeholders, error
-messages, and toggle titles. The linter tokenizes camelCase and separators,
-removes bounded prompt words such as "enter", "paste", and "your", and matches
-the remaining secret concept exactly against an explicit vocabulary. Known
-compounds include "secret key" and "secret token"; `secretToken`,
-`secret_token`, "secret-token", and "Paste your secret token" are caught.
-Non-input/action-data keys use the same vocabulary after removing all
-non-alphanumeric characters and lowercasing, without stripping prompt words.
+messages, and toggle titles. The linter splits camelCase/acronyms and separators,
+then detects a secret term as a contiguous token sequence **anywhere** in each
+candidate. No prompt words are stripped. "Enter API token to continue",
+"Password confirmation", and "secret token input" are rejected without requiring
+their surrounding wording to be listed. Collapsed spellings of known terms,
+such as `apikey` and `secrettoken`, are also recognized as whole tokens.
 
-Do not flag a longer name merely because it contains a secret-related token or
-substring. Benign
-names such as `tokenCount`, `keywords`, `passwordPolicyUrl`, `secretSantaName`,
-`accessLevel`, `keyFindings`, `tokenizer`, `secretary`, and "API key label"
-remain allowed. The linter does not infer arbitrary new compounds; this bounded
-vocabulary does not replace reviewing the meaning of the complete card.
+This is token matching, not arbitrary substring matching: `keyword`, `keywords`,
+`tokenizer`, and `secretary` stay whole words. Bare `key` and `access` are not
+secret terms, so `keyFindings` and `accessLevel` need no exception.
+
+These are the complete input-only benign-phrase exceptions:
+
+| Exact phrase | Permitted meaning |
+|---|---|
+| `token count` | A numeric count, including `tokenCount` and `secretaryTokenCount`, not token contents |
+| `password policy` | Policy text or its URL, including `passwordPolicyUrl`, not a password |
+| `secret santa name` | A gift-exchange participant name, not authentication data |
+| `secret tokenizer` | A tokenizer name or type, not a token value |
+| `credential type` | A credential category, not the credential itself |
+| `access token status` | A status such as configured/expired, not an access token |
+| `api key label` | A display label, not an API key |
+| `signing key status` | A key status, not signing material |
+| `connection string format` | A format description, not a live connection string |
+| `secret token status` | A status such as configured/expired; `secretTokenStatus` is intentionally allowed |
+| `secret token label` | A display label; `secretTokenLabel` is intentionally allowed |
+
+The exceptions use the same token boundaries and cover only occurrences fully
+inside the matched benign phrase. They never exempt a whole input or prompt.
+"Token count and password" and a `secretTokenStatus` input whose placeholder
+asks for an API token still fail. Review actual data meaning even when a field
+name is exempt; naming cannot make a credential safe to collect.
+
+New compounds containing secret terms are flagged by default. `tokenUsage`,
+`passwordHelp`, and `privateKeyLabel` are conservative flags until reviewed.
+`secretQuestion` and `secretQuestionAnswer` are intentionally flagged because
+authentication challenge material is not confidently benign.
+To request an exception, provide synthetic field/prompt examples and the
+non-secret output contract to the skill maintainer. Any change must add an
+explicit entry to `BENIGN_INPUT_PHRASES`, document its meaning here, and include
+both allowed examples and tests that nearby secret requests remain rejected.
+There is no card-supplied bypass or context-word allow-list.
+
+Non-input/action-data key scanning is unchanged: remove all non-alphanumeric
+characters, lowercase, and compare exactly against the secret vocabulary.
+Input exceptions never weaken that scan or the embedded-credential patterns.
+This bounded policy does not understand every language or prove a card contains
+no sensitive content; review the complete card and enforce controls downstream.
 
 Cards are untrusted presentation and input surfaces. Enforce permissions, validation, idempotency, and business rules downstream.
 

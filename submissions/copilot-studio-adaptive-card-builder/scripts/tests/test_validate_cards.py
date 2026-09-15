@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -102,6 +103,67 @@ class CardLinterTests(unittest.TestCase):
         self.assertIn("optional for approval", guidance)
         self.assertIn("reject or request changes", guidance)
         self.assertIn("require a comment", guidance)
+
+    def test_catalog_outputs_match_all_bundled_templates(self):
+        reference = (
+            SUBMISSION_ROOT / "references" / "host-profiles-and-contracts.md"
+        ).read_text(encoding="utf-8")
+
+        def objects(value):
+            if isinstance(value, dict):
+                yield value
+                for child in value.values():
+                    yield from objects(child)
+            elif isinstance(value, list):
+                for child in value:
+                    yield from objects(child)
+
+        documented_templates = set()
+        for row in reference.splitlines():
+            if not re.match(r"^\| `[^`]+\.json`", row):
+                continue
+            cells = row.split("|")
+            name = cells[1].strip(" `")
+            documented_templates.add(name)
+            with self.subTest(template=name):
+                card = json.loads(
+                    (SUBMISSION_ROOT / "assets" / "templates" / name).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                nodes = list(objects(card))
+                inputs = {
+                    node["id"] for node in nodes
+                    if node.get("type", "").startswith("Input.")
+                }
+                actions = [
+                    node for node in nodes if node.get("type") == "Action.Submit"
+                ]
+                data_keys = {key for action in actions for key in action["data"]}
+                documented = set(re.findall(r"`([^`]+)`", cells[4]))
+                self.assertFalse(documented - inputs - data_keys)
+                self.assertFalse(inputs - documented)
+                self.assertEqual(
+                    cells[2].strip(), "Interactive" if actions else "Informational"
+                )
+        self.assertEqual(
+            documented_templates,
+            {path.name for path in (SUBMISSION_ROOT / "assets" / "templates").glob("*.json")},
+        )
+
+    def test_wiring_requires_card_and_submit_identity_before_action_branch(self):
+        skill = (SUBMISSION_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        wiring = skill.split("### 6. Produce Copilot Studio wiring", 1)[1]
+        step = next(line for line in wiring.splitlines() if line.startswith("5. "))
+        self.assertIn("exact expected `cardId` and `actionSubmitId`", step)
+        self.assertIn("trusted conversation state", step)
+        self.assertNotIn("`actionSubmitId` or `actionId`", skill)
+        reference = (
+            SUBMISSION_ROOT / "references" / "host-profiles-and-contracts.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("cardId equals approval_decision_v1", reference)
+        self.assertIn("actionSubmitId equals approval_decision_v1_approve", reference)
+        self.assertIn("Never branch on `actionId` alone", reference)
 
     def test_invalid_json_is_reported(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -495,6 +557,139 @@ class CardLinterTests(unittest.TestCase):
                 self.assertEqual(self.codes(result), {"PRIVACY.SECRET_PROPERTY"})
                 self.assertEqual(result.errors[0].path, f"$.actions[0].data.{key}")
 
+    def test_secret_terms_are_detected_anywhere_in_input_prompts(self):
+        prompts = (
+            "Enter your password",
+            "API token",
+            "Paste your API token",
+            "Enter API token to continue",
+            "Password confirmation",
+            "secret token input",
+            "For the next step, supply a private.key now",
+            "Your connectionString goes here",
+            "Confirm the client secret before continuing",
+            "Optional signing-key for integration setup",
+            "Enter your access-token after verification",
+            "RefreshToken used by this integration",
+            "Put your apikey here",
+            "Integration secrettoken required",
+        )
+        for surface in ("label", "placeholder", "errorMessage", "title"):
+            for prompt in prompts:
+                with self.subTest(surface=surface, prompt=prompt):
+                    card = base_card()
+                    field = {
+                        "type": "Input.Toggle" if surface == "title" else "Input.Text",
+                        "id": "entry",
+                        "label": "Service value",
+                    }
+                    field[surface] = prompt
+                    card["body"].append(field)
+                    card["actions"] = [submit_action()]
+                    result = self.lint(card)
+                    self.assertEqual(self.codes(result), {"PRIVACY.SECRET_INPUT"})
+                    self.assertEqual(len(result.errors), 1)
+
+    def test_secret_subsequences_are_detected_in_input_identifiers(self):
+        for input_id in (
+            "serviceAccessTokenValue", "passwordConfirmation", "secretTokenInput",
+            "currentPrivateKey", "integration_connection_string", "api_key_entry",
+            "service_apikey_value",
+        ):
+            with self.subTest(input_id=input_id):
+                card = base_card()
+                card["body"].append(input_text(input_id))
+                card["actions"] = [submit_action()]
+                self.assertIn("PRIVACY.SECRET_INPUT", self.codes(self.lint(card)))
+
+    def test_every_benign_phrase_is_explicitly_documented_and_passes(self):
+        reference = (
+            SUBMISSION_ROOT / "references" / "host-profiles-and-contracts.md"
+        ).read_text(encoding="utf-8")
+        for phrase in validate_cards.BENIGN_INPUT_PHRASES:
+            self.assertIn(f"`{phrase}`", reference)
+            words = phrase.split()
+            camel_case = words[0] + "".join(word.title() for word in words[1:])
+            for text in (phrase, camel_case, phrase.replace(" ", "_"), phrase.upper()):
+                with self.subTest(phrase=phrase, text=text):
+                    card = base_card()
+                    field = input_text()
+                    field["label"] = f"Please enter {text} to continue"
+                    card["body"].append(field)
+                    card["actions"] = [submit_action()]
+                    self.assertTrue(self.lint(card).ok)
+
+    def test_benign_exceptions_cannot_hide_separate_secret_terms(self):
+        for phrase in validate_cards.BENIGN_INPUT_PHRASES:
+            for prompt in (
+                f"{phrase} and password",
+                f"API key followed by {phrase}",
+                f"{phrase} and its secret value",
+                f"private {phrase} key",
+            ):
+                with self.subTest(phrase=phrase, prompt=prompt):
+                    card = base_card()
+                    field = input_text()
+                    field["label"] = prompt
+                    card["body"].append(field)
+                    card["actions"] = [submit_action()]
+                    result = self.lint(card)
+                    # Exception removal must not join noncontiguous words.
+                    if prompt.startswith("private ") and prompt.endswith(" key"):
+                        self.assertNotIn("PRIVACY.SECRET_INPUT", self.codes(result))
+                    else:
+                        self.assertIn("PRIVACY.SECRET_INPUT", self.codes(result))
+
+    def test_benign_id_does_not_exempt_secret_prompt_on_same_input(self):
+        card = base_card()
+        card["body"].append(
+            {
+                "type": "Input.Text",
+                "id": "secretTokenStatus",
+                "label": "Secret token status",
+                "placeholder": "Paste your secret token to check its status",
+            }
+        )
+        card["actions"] = [submit_action()]
+        self.assertIn("PRIVACY.SECRET_INPUT", self.codes(self.lint(card)))
+
+    def test_new_unlisted_compounds_with_secret_terms_are_flagged(self):
+        for input_id in (
+            "tokenUsage", "passwordHelp", "secretProject", "secretQuestion",
+            "secretQuestionAnswer",
+            "privateKeyLabel",
+        ):
+            with self.subTest(input_id=input_id):
+                card = base_card()
+                card["body"].append(input_text(input_id))
+                card["actions"] = [submit_action()]
+                self.assertIn("PRIVACY.SECRET_INPUT", self.codes(self.lint(card)))
+
+    def test_tokenization_preserves_lexical_words(self):
+        for word in ("keyword", "keywords", "tokenizer", "secretary"):
+            self.assertEqual(validate_cards.tokenize_sensitive_name(word), [word])
+        for value, expected in (
+            ("APIKey", ["api", "key"]),
+            ("keyFindings", ["key", "findings"]),
+            ("secretTokenizer", ["secret", "tokenizer"]),
+            ("private.key", ["private", "key"]),
+        ):
+            self.assertEqual(validate_cards.tokenize_sensitive_name(value), expected)
+
+    def test_input_exceptions_do_not_change_non_input_secret_key_policy(self):
+        for key in validate_cards.SECRET_FIELD_TERMS:
+            with self.subTest(key=key):
+                card = base_card()
+                action = submit_action()
+                action["data"][key] = "synthetic-value"
+                card["actions"] = [action]
+                self.assertIn("PRIVACY.SECRET_PROPERTY", self.codes(self.lint(card)))
+        card = base_card()
+        action = submit_action()
+        action["data"]["serviceAccessTokenValue"] = "synthetic-value"
+        card["actions"] = [action]
+        self.assertTrue(self.lint(card).ok)
+
     def test_benign_compound_names_and_prompts_are_not_rejected(self):
         names = (
             ("tokenCount", "Token count"),
@@ -537,7 +732,6 @@ class CardLinterTests(unittest.TestCase):
             ("passwordPolicy", "Password policy"),
             ("signingKeyStatus", "Signing key status"),
             ("connectionStringFormat", "Connection string format"),
-            ("secretQuestion", "Secret question"),
         ):
             with self.subTest(input_id=input_id, label=label):
                 card = base_card()
