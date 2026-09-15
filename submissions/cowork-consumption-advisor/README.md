@@ -7,6 +7,14 @@ shows what was consumed - but tab by tab, as snapshots, with no join between *wh
 *which group*, *how many tasks* and *what it cost*. This skill takes the five exports an admin
 already has and turns them into one interactive report an executive can read in two minutes.
 
+## Why
+Copilot Cowork and the Work IQ API are billed in Copilot Credits through usage-based billing. The
+Microsoft 365 admin center shows the numbers but only as snapshots, tab by tab, with no organisational
+context. This skill reads the exports an admin already has, enriches consuming users with department,
+job title, country and manager from Microsoft Graph, and produces one report an executive can read in
+two minutes. Group, policy and user exports are independent aggregates (the admin center does not
+export user-to-policy membership), so they are shown side by side rather than joined.
+
 ## What you get
 - **Headline KPIs** - credits used, prepaid vs pay-as-you-go share, estimated cost, active users,
   credits per active user, credits per Cowork task, month-end or annualised forecast
@@ -43,7 +51,13 @@ touching a tenant.
 ## How to use
 Drop the exports into the conversation and say **"Build a consumption report from these files"**
 (or `/analyze-cowork-consumption`). Optional: currency and contracted rate
-(`--currency EUR --rate 0.0092`), `--anonymize` for wide distribution.
+(`--currency EUR --rate 0.0092`), `--anonymize` for wide distribution (pseudonymises every output),
+`--period ytd` if you exported with a year-to-date filter (default is the current billing month).
+
+Quick start outside Cowork:
+```
+python scripts/analyze_consumption.py --input <exports folder> --org <graph json folder> --out ./report
+```
 
 ## Good to know
 - **Reporting only.** It never changes spending policies, limits or billing methods.

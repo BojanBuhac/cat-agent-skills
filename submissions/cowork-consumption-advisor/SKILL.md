@@ -19,14 +19,11 @@ metadata:
 
 # Cowork & Work IQ Consumption Advisor
 
-## Overview
-Copilot Cowork and the Work IQ API are billed in Copilot Credits through usage-based billing.
-The Microsoft 365 admin center shows the numbers but only as snapshots, tab by tab. This skill
-reads the exports an admin already has, enriches every consuming user with department, job title,
-country and manager from Microsoft Graph, joins everything, and produces one self-contained HTML
-report plus a short executive summary and a JSON file with every figure. Analysis runs in the bundled
-Python script (standard library only) so numbers are computed, never estimated by the model.
-The skill **reports**; it never changes policies, limits or billing methods.
+Reporting skill. Inputs are Microsoft 365 admin center CSV exports (plus directory data from
+Microsoft Graph); output is a self-contained HTML report, a Markdown summary and a JSON file
+with every figure. All numbers are computed by `scripts/analyze_consumption.py` (standard
+library only) - never estimate them in prose. The skill never changes policies, limits or
+billing methods.
 
 ## When to Use
 - `/analyze-cowork-consumption` or "build a consumption report from these files"
@@ -62,9 +59,9 @@ See [references/data-sources.md](references/data-sources.md) for column definiti
 refresh cadence and caveats. Sample exports with synthetic data are in
 [assets/sample-exports/](assets/sample-exports/) for testing.
 
-## Quick Start
+## Procedure (summary)
 ```
-User: "/analyze-cowork-consumption - here are this month's exports"
+Trigger: "/analyze-cowork-consumption" or "build a consumption report from these files"
 1. Locate the CSVs (input/ or attached folder). Do not ask which is which - the script detects them.
 2. Enrich users from Microsoft Graph (department, manager): read the UPNs from the Users export,
    query Graph in batches of 15, save each JSON response to working/org/batch-N.json.
@@ -118,8 +115,12 @@ python scripts/analyze_consumption.py --input <files or folder> --org working/or
 ```
 - Defaults: pay-as-you-go list rate 0.01 per credit, prepaid 0.008 (a 25,000-credit pack at 200).
   If the user gives a contracted rate or currency, pass it - never guess a discount.
-- `--period auto` treats activity spanning more than 40 days as an accumulated view and reports
-  monthly and annualised run-rates; otherwise it projects the current billing month.
+- The exports report **"Monthly credits used"** (current billing month), so the default projects
+  the current month. Pass `--period ytd` **only** when the user confirms the export was taken with a
+  year-to-date filter; it then uses calendar-year run-rates. Never infer YTD from activity dates.
+- Group, policy and user rows are independent aggregates: the exports contain no user-to-group or
+  user-to-policy membership, so do not claim to know which policy a given user is in. Department
+  and manager come from the directory join (Step 2) only.
 - `--org` accepts Graph JSON files/folders and/or org CSVs; JSON files placed in the `--input`
   folder are picked up automatically. Without directory data the report still runs, minus the
   department and manager sections.
@@ -134,6 +135,8 @@ python scripts/analyze_consumption.py --input <files or folder> --org working/or
   **spend by department and by manager** (`org.departments`, `org.managers`), concentration
   (top users / groups), unlimited or near-limit policies, prepaid vs PAYG mix.
 - Report directory coverage (`org.coverage`); below ~80 % say the department view is partial.
+- Credits per task is computed over users present in both the consumption and usage exports
+  (`headline.matchedTasks` of `headline.totalTasks`); say so when they differ materially.
 - Every recommendation in the report carries its evidence line. Repeat the evidence when you
   present it; drop a recommendation if the user gives context that invalidates it.
 - Always surface the data-quality notes (snapshot mismatch, users over 100 % of a changed limit,
@@ -159,8 +162,9 @@ Chat response, in this order, under ~250 words:
 - Never fabricate or extrapolate beyond the script's output; if a figure is missing, say why.
 - Costs are list-rate estimates. State that the Microsoft invoice on the Azure subscription named in
   the billing method is the record of truth.
-- Respect privacy: use `--anonymize` when the report will be shared beyond admins; if the tenant
-  has pseudonymised usage reports, keep names pseudonymised.
+- Respect privacy: `--anonymize` replaces user and manager names/UPNs with stable pseudonyms in
+  all three outputs (HTML, JSON, Markdown) - use it when the report will be shared beyond admins.
+  If the tenant has pseudonymised usage reports, keep names pseudonymised.
 - Directory lookups are read-only Graph GETs; never write to user profiles. Do not fabricate
   department or manager values for unresolved users.
 - Watchlists and manager roll-ups are spend-control views. Do not rank people or managers by
