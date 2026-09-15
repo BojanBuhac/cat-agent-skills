@@ -45,8 +45,8 @@ Exports from **Microsoft 365 admin center > Copilot** (CSV, any file name - dete
 Only Users *or* Agents and services is strictly required; every extra export unlocks a section.
 Department and manager data is collected by the skill itself through Microsoft Graph
 (`/users?$expand=manager`, read-only). An Entra user export or a simple org CSV works as a fallback.
-Synthetic sample exports ship in `assets/sample-exports/` so you can see the report before
-touching a tenant.
+Synthetic sample exports ship in `assets/sample-exports/` (five CSVs plus a Graph user JSON with
+managers) so you can see the report before touching a tenant.
 
 ## How to use
 Drop the exports into the conversation and say **"Build a consumption report from these files"**
@@ -66,8 +66,9 @@ python scripts/analyze_consumption.py --input <exports folder> --org <graph json
 - **Computed, not guessed.** All figures come from the bundled Python script (standard library only).
 - **Invoice is truth.** Costs are list-rate estimates; the Azure subscription in the billing method
   carries the real bill.
-- **Privacy aware.** `--anonymize` hides names and UPNs; watchlists are spend-control, not
-  performance ranking.
+- **Privacy aware.** `--anonymize` replaces names and UPNs with keyed pseudonyms (random per-run
+  secret, so they cannot be reversed from a directory listing) and redacts input paths in every
+  output; watchlists are spend-control, not performance ranking.
 
 Complements the *Copilot Adoption Dashboard* skill (licence adoption from MAC usage reports) and
 the Copilot ROI team's *Consumption Central* / *Chargeback* Power BI templates on Analytics Hub -

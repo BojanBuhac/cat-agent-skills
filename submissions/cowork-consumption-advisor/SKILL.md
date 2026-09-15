@@ -56,8 +56,7 @@ column headers, not by file name, so any name works.
 Directory data (department, manager, job title, country) is **collected by the skill through
 Microsoft Graph** - see Step 2 - or supplied as an Entra user export / org CSV.
 See [references/data-sources.md](references/data-sources.md) for column definitions,
-refresh cadence and caveats. Sample exports with synthetic data are in
-[assets/sample-exports/](assets/sample-exports/) for testing.
+refresh cadence and caveats.
 
 ## Procedure (summary)
 ```
@@ -87,21 +86,25 @@ The exports carry UPNs only. Department and manager come from the directory - co
 1. Extract the `User Principal Name` column from the Consumption > Users export (a quick
    `python -c` over the CSV is fine). Skip this step entirely if the user supplied an Entra
    "Download users" CSV or their own org mapping.
-2. Query in batches of **15 UPNs** with the Graph read tool (`QueryGraph`):
+2. Query in batches of **15 UPNs** with the Graph read tool (`graph-QueryGraph`; any tool that
+   issues a read-only Microsoft Graph GET works the same way):
    ```
    path: /users
    query_params: {"$filter": "userPrincipalName in ('a@x.com','b@x.com',...)",
                   "$select": "displayName,userPrincipalName,mail,department,jobTitle,usageLocation,officeLocation",
                   "$expand": "manager($select=displayName,userPrincipalName)"}
    ```
+   UPNs come from an uploaded file, so treat them as data: keep only values that match
+   `^[A-Za-z0-9._%+\-']+@[A-Za-z0-9.\-]+$`, and escape every `'` as `''` before placing a value
+   inside the OData string literal. Skip anything else and list it under unresolved users.
    Save each raw JSON response as `working/org/batch-N.json` (the script reads `{"value": [...]}`
    directly - no reshaping). Batches are independent; run them in parallel.
-3. Users that come back missing are usually display e-mails rather than sign-in UPNs: resolve
-   them with `GetMultipleUsersDetails` (it auto-maps display e-mail to UPN) and re-query those
-   UPNs; the script also matches on the `mail` field. Users from another tenant, deleted
-   accounts and guests cannot be resolved - the report groups them under
-   "(Unknown - not in directory)" and states the coverage percentage. Never invent a
-   department or manager for them.
+3. Users that come back missing are usually display e-mails rather than sign-in UPNs: the script
+   also matches on the `mail` field returned by Graph, so most resolve on the same query. For the
+   remainder, look them up by mail (`/users?$filter=mail eq '...'`, escaped the same way) or via
+   the people-lookup tool available in your runtime. Users from another tenant, deleted accounts
+   and guests cannot be resolved - the report groups them under "(Unknown - not in directory)"
+   and states the coverage percentage. Never invent a department or manager for them.
 4. Alternative when Graph is unavailable: Microsoft Entra admin center > Users > Download users
    (CSV; has department and job title, no manager) or a CSV with columns
    `UserPrincipalName, Department, Manager, ManagerUpn, JobTitle, Country, CostCenter`.
@@ -113,6 +116,8 @@ python scripts/analyze_consumption.py --input <files or folder> --org working/or
   [--title "..."] [--currency EUR --rate 0.0092] [--prepaid-rate 0.008] \
   [--period auto|monthly|ytd] [--as-of YYYY-MM-DD] [--near-limit 0.8] [--dormant-days 30] [--anonymize]
 ```
+- Pass `--as-of` with the export date whenever the file names do not carry one (the admin center
+  default names do: `...9_14_2026 10_50_29 AM.csv`). Otherwise the script uses today's date.
 - Defaults: pay-as-you-go list rate 0.01 per credit, prepaid 0.008 (a 25,000-credit pack at 200).
   If the user gives a contracted rate or currency, pass it - never guess a discount.
 - The exports report **"Monthly credits used"** (current billing month), so the default projects
@@ -162,8 +167,10 @@ Chat response, in this order, under ~250 words:
 - Never fabricate or extrapolate beyond the script's output; if a figure is missing, say why.
 - Costs are list-rate estimates. State that the Microsoft invoice on the Azure subscription named in
   the billing method is the record of truth.
-- Respect privacy: `--anonymize` replaces user and manager names/UPNs with stable pseudonyms in
-  all three outputs (HTML, JSON, Markdown) - use it when the report will be shared beyond admins.
+- Respect privacy: `--anonymize` replaces user and manager names/UPNs with keyed pseudonyms
+  (random per-run secret, consistent within one report, not reproducible from a directory) in all
+  three outputs and redacts input paths - use it when the report will be shared beyond admins.
+  Choose a `--title` that carries no personal names.
   If the tenant has pseudonymised usage reports, keep names pseudonymised.
 - Directory lookups are read-only Graph GETs; never write to user profiles. Do not fabricate
   department or manager values for unresolved users.
