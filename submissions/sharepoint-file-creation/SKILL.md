@@ -81,9 +81,6 @@ explicit pre-upload confirmation step only when the request is ambiguous about w
 was actually wanted, the destination is not already fixed/configured, or the content touches
 anything sensitive.
 
-Never overwrite an existing file; if the chosen filename collides, generate a new unique name
-rather than setting overwrite unless the user explicitly asked to replace a named file.
-
 ## 4. Report
 
 State clearly: what was generated (type and content source), the destination in SharePoint

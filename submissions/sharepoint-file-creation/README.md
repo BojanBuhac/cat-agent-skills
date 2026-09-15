@@ -44,8 +44,6 @@ remain unchanged.
 
 ## Boundaries
 
-- The skill does not overwrite existing files unless the user explicitly asks
-  to replace a named file.
 - It does not automatically truncate or split oversized output.
 - It stops on permission, DLP, authentication, ambiguous-result, size, or
   integrity errors rather than silently retrying.
