@@ -21,6 +21,11 @@ Copilot Studio supports Adaptive Cards 1.6 and earlier, but target hosts differ:
 | `web-chat-1.6` | 1.6 | Bot Framework Web Chat | `Action.Execute` remains unsupported |
 | `test-chat-1.6` | 1.6 | Copilot Studio test chat | Test-only evidence, not deployment evidence |
 
+Every profile has a **minimum schema version of 1.5**, because this package
+requires the first body element to use `TextBlock` with `style: "heading"`.
+Versions 1.3 and 1.4 are unsupported by this bounded policy, regardless of host
+support. The maximum versions in the table still apply.
+
 The linter supports a deliberately conservative subset:
 
 ### Elements
@@ -226,9 +231,18 @@ Reject or redesign a card that:
 Inspect input IDs and all visible input prompts: labels, placeholders, error
 messages, and toggle titles. The linter tokenizes camelCase and separators,
 removes bounded prompt words such as "enter", "paste", and "your", and matches
-the remaining secret concept exactly. It does not flag embedded substrings or
-metadata concepts such as `tokenizer`, `secretary`, or "API key label". This
-bounded check does not replace reviewing the meaning of the complete card.
+the remaining secret concept exactly against an explicit vocabulary. Known
+compounds include "secret key" and "secret token"; `secretToken`,
+`secret_token`, "secret-token", and "Paste your secret token" are caught.
+Non-input/action-data keys use the same vocabulary after removing all
+non-alphanumeric characters and lowercasing, without stripping prompt words.
+
+Do not flag a longer name merely because it contains a secret-related token or
+substring. Benign
+names such as `tokenCount`, `keywords`, `passwordPolicyUrl`, `secretSantaName`,
+`accessLevel`, `keyFindings`, `tokenizer`, `secretary`, and "API key label"
+remain allowed. The linter does not infer arbitrary new compounds; this bounded
+vocabulary does not replace reviewing the meaning of the complete card.
 
 Cards are untrusted presentation and input surfaces. Enforce permissions, validation, idempotency, and business rules downstream.
 

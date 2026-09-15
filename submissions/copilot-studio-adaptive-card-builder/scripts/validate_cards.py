@@ -124,6 +124,7 @@ SECRET_FIELD_TERMS = {
     "sas token",
     "secret",
     "secret key",
+    "secret token",
     "signing key",
     "token",
     "credential",
@@ -372,11 +373,11 @@ class CardLinter:
                     "$.version",
                     f'Card version {version} exceeds profile "{self.profile}" maximum {maximum}.',
                 )
-            if parsed_version < (1, 3):
+            if parsed_version < (1, 5):
                 self.error(
                     "POLICY.VERSION",
                     "$.version",
-                    "This package requires schema 1.3 or later for accessible labels and input validation.",
+                    "This package requires schema 1.5 or later for the required heading style.",
                 )
 
         body = card.get("body")

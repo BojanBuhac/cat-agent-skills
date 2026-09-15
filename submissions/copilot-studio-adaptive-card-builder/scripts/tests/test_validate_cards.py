@@ -140,6 +140,39 @@ class CardLinterTests(unittest.TestCase):
         result = self.lint(card, profile="teams-1.5")
         self.assertIn("HOST.VERSION", self.codes(result))
 
+    def test_versions_below_1_5_report_explicit_policy_minimum(self):
+        for profile in validate_cards.PROFILES:
+            for version in ("1.0", "1.2", "1.3", "1.4"):
+                for heading in (True, False):
+                    with self.subTest(profile=profile, version=version, heading=heading):
+                        card = base_card()
+                        card["version"] = version
+                        if not heading:
+                            del card["body"][0]["style"]
+                        result = self.lint(card, profile=profile)
+                        errors = [
+                            item for item in result.errors
+                            if item.code == "POLICY.VERSION"
+                        ]
+                        self.assertEqual(len(errors), 1)
+                        self.assertEqual(errors[0].path, "$.version")
+                        self.assertIn("1.5 or later", errors[0].message)
+
+    def test_versions_from_1_5_preserve_profile_caps_and_heading_requirement(self):
+        for profile, maximum in validate_cards.PROFILES.items():
+            for version in ("1.5", "1.6", "1.7"):
+                with self.subTest(profile=profile, version=version):
+                    card = base_card()
+                    card["version"] = version
+                    result = self.lint(card, profile=profile)
+                    self.assertNotIn("POLICY.VERSION", self.codes(result))
+                    if tuple(map(int, version.split("."))) <= maximum:
+                        self.assertTrue(result.ok, result.errors)
+                    else:
+                        self.assertIn("HOST.VERSION", self.codes(result))
+                    del card["body"][0]["style"]
+                    self.assertIn("ACCESS.HEADING", self.codes(self.lint(card, profile)))
+
     def test_action_execute_is_rejected_for_web_chat(self):
         card = base_card()
         card["version"] = "1.6"
@@ -411,6 +444,88 @@ class CardLinterTests(unittest.TestCase):
                 card["actions"] = [submit_action()]
                 result = self.lint(card)
                 self.assertIn("PRIVACY.SECRET_INPUT", self.codes(result))
+
+    def test_compound_secret_token_input_ids_are_rejected(self):
+        for input_id in (
+            "secretToken", "SecretToken", "secret_token", "SECRET_TOKEN",
+            "secrettoken", "secretTokenInput",
+        ):
+            with self.subTest(input_id=input_id):
+                card = base_card()
+                card["body"].append(
+                    {"type": "Input.Text", "id": input_id, "label": "Service value"}
+                )
+                card["actions"] = [submit_action()]
+                result = self.lint(card)
+                self.assertEqual(self.codes(result), {"PRIVACY.SECRET_INPUT"})
+                self.assertEqual(result.errors[0].path, "$.body[1]")
+
+    def test_compound_secret_token_visible_prompt_variants_are_rejected(self):
+        for property_name in ("label", "placeholder", "errorMessage", "title"):
+            for prompt in (
+                "secretToken", "secret_token", "secret-token", "secret.token",
+                "secret token", "secret:token", "SECRET TOKEN",
+                "Paste your secret token here",
+            ):
+                with self.subTest(property=property_name, prompt=prompt):
+                    card = base_card()
+                    field = {
+                        "type": "Input.Toggle" if property_name == "title" else "Input.Text",
+                        "id": "entry",
+                        "label": "Service value",
+                    }
+                    field[property_name] = prompt
+                    card["body"].append(field)
+                    card["actions"] = [submit_action()]
+                    result = self.lint(card)
+                    self.assertEqual(self.codes(result), {"PRIVACY.SECRET_INPUT"})
+                    self.assertEqual(len(result.errors), 1)
+
+    def test_compound_secret_token_action_data_key_variants_are_rejected(self):
+        for key in (
+            "secretToken", "secret_token", "secret-token", "secret.token",
+            "secret token", "secret:token", "SECRET TOKEN", "secrettoken",
+        ):
+            with self.subTest(key=key):
+                card = base_card()
+                action = submit_action()
+                action["data"][key] = "synthetic-value"
+                card["actions"] = [action]
+                result = self.lint(card)
+                self.assertEqual(self.codes(result), {"PRIVACY.SECRET_PROPERTY"})
+                self.assertEqual(result.errors[0].path, f"$.actions[0].data.{key}")
+
+    def test_benign_compound_names_and_prompts_are_not_rejected(self):
+        names = (
+            ("tokenCount", "Token count"),
+            ("keywords", "Keywords"),
+            ("passwordPolicyUrl", "Password policy URL"),
+            ("secretSantaName", "Secret Santa name"),
+            ("accessLevel", "Access level"),
+            ("keyFindings", "Key findings"),
+            ("secretTokenStatus", "Secret token status"),
+            ("secretTokenLabel", "Secret token label"),
+            ("secretTokenizer", "Secret tokenizer"),
+            ("secretaryTokenCount", "Secretary token count"),
+        )
+        for surface in ("id", "label", "placeholder", "errorMessage", "title", "data"):
+            for input_id, prompt in names:
+                with self.subTest(surface=surface, input_id=input_id):
+                    card = base_card()
+                    action = submit_action()
+                    if surface == "data":
+                        action["data"][input_id] = "synthetic-value"
+                    else:
+                        field = {
+                            "type": "Input.Toggle" if surface == "title" else "Input.Text",
+                            "id": "entry",
+                            "label": "Service value",
+                        }
+                        field[surface] = input_id if surface == "id" else prompt
+                        card["body"].append(field)
+                    card["actions"] = [action]
+                    result = self.lint(card)
+                    self.assertTrue(result.passes(warnings_as_errors=True), result.errors)
 
     def test_innocuous_input_names_are_not_rejected(self):
         for input_id, label in (

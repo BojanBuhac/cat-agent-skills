@@ -75,7 +75,7 @@ python scripts/validate_cards.py card.json --profile teams-1.5 --mode interactiv
 
 Machine-readable output is available with `--format json`. Add `--warnings-as-errors` for a stricter quality gate: warnings then produce `FAIL` in text, `ok: false` in JSON results, and a nonzero exit code. Diagnostics retain their original warning severity.
 
-Run the 51 regression tests and strict template lint from the same skill directory:
+Run the 57 regression tests and strict template lint from the same skill directory:
 
 ```shell
 python -B -m unittest discover -s scripts/tests -p "test_*.py"
@@ -93,6 +93,10 @@ python -B scripts/validate_cards.py assets/templates --profile portable-1.5 --wa
 | `test-chat-1.6` | 1.6 | Copilot Studio test chat only |
 
 The bundled templates stay at version 1.5. `Action.Execute` is outside every bundled profile. The safe action subset is `Action.Submit` and HTTPS `Action.OpenUrl`.
+
+All bundled profiles require **schema 1.5 or later**, up to the maximum listed
+above, because the package requires `TextBlock` heading style. Cards using 1.3
+or 1.4 are outside this package's policy even if a host supports them.
 
 ## Product facts and sources
 

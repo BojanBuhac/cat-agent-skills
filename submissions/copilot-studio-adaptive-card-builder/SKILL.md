@@ -141,6 +141,9 @@ For destructive or irreversible operations:
 
 Use Adaptive Cards schema 1.5 unless the requirement specifically needs a verified 1.6 feature and the target is `web-chat-1.6` or `test-chat-1.6`.
 
+Schema 1.5 is the package minimum because heading style is required. Do not
+target 1.3 or 1.4 or remove the heading to accommodate an older schema.
+
 Apply these defaults:
 
 * Include `$schema`, `type`, `version`, `body`, and meaningful `fallbackText`.

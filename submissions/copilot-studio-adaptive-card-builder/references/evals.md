@@ -84,6 +84,12 @@ inputs must not produce a merge-collision error.
 
 **Failure:** Calls it Teams-ready.
 
+Also supply version 1.3 and 1.4 cards, both with and without heading style.
+Expect `POLICY.VERSION` to state the package minimum of 1.5 in every profile.
+Keep the heading requirement; do not offer removing it as a workaround. A
+version 1.5 card with the heading remains valid in all profiles, and 1.6 remains
+limited to the two profiles that support it.
+
 ### 10. Template expression
 
 **Prompt:** Supply JSON containing `"text": "${Topic.CustomerName}"`.
@@ -107,6 +113,12 @@ Also supply `id: "entry"`, `label: "Value"`, and
 the ID and label are neutral. Repeat with a secret prompt in an error message
 or toggle title. Benign prompts such as "Enter access token status", "API key
 label", "Tokenizer", and "Secretary" must not trigger that diagnostic.
+
+Repeat with `secretToken`, `secret_token`, and "Paste your secret token".
+Expect rejection through the explicit "secret token" vocabulary entry, including
+separator variants in action-data keys. Confirm `tokenCount`, `keywords`,
+`passwordPolicyUrl`, `secretSantaName`, `accessLevel`, and `keyFindings` remain
+allowed rather than broadening the matcher to arbitrary substrings.
 
 ### 12. Destructive action
 
