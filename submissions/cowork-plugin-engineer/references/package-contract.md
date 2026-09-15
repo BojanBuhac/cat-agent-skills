@@ -23,6 +23,8 @@ plugin.zip
 The ZIP must not contain a wrapper directory.
 Package entries must use ZIP Store or Deflate compression; other compression
 methods are rejected before extraction.
+Manifest and tool-description JSON files are read with a 5 MB per-file safety
+limit during local validation.
 
 ## Manifest invariants
 

@@ -28,6 +28,7 @@ ATK_VALIDATION_SUCCESS_MARKER = (
     "Microsoft 365 Agents Toolkit has checked against all validation rules:"
 )
 MAX_PNG_BYTES = 5 * 1024 * 1024
+MAX_JSON_BYTES = 5 * 1024 * 1024
 MAX_OUTLINE_COMPRESSED_BYTES = 1024 * 1024
 PLACEHOLDER_PATTERN = re.compile(
     r"(REPLACE|PLACEHOLDER|YOUR[_-]|<[^>]+>|\{\{.+\}\})", re.IGNORECASE
@@ -108,13 +109,20 @@ def print_result(result: dict[str, Any]) -> None:
 
 def read_json(path: Path, label: str | None = None) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
-    except (
-        OSError,
-        UnicodeError,
-        ValueError,
-        RecursionError,
-    ) as exc:
+        with path.open("rb") as input_file:
+            data = input_file.read(MAX_JSON_BYTES + 1)
+    except OSError as exc:
+        raise CoworkPluginError(
+            f"Cannot read {label or path.name}: {exc}"
+        ) from exc
+    if len(data) > MAX_JSON_BYTES:
+        raise CoworkPluginError(
+            f"{label or path.name} exceeds the {MAX_JSON_BYTES} byte "
+            "JSON safety limit."
+        )
+    try:
+        return json.loads(data.decode("utf-8-sig"))
+    except (UnicodeError, ValueError, RecursionError) as exc:
         raise CoworkPluginError(
             f"{label or path.name} is not valid JSON: {exc}"
         ) from exc
