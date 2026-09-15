@@ -17,7 +17,9 @@
     "limitations": {"type": "array", "items": {"type": "string"}}
   },
   "$defs": {
-    "relativePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000-\\u001F]+$"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "relativePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?![A-Za-z]:)(?!\\.$)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000-\\u001F\\u007F-\\u009F]+$"},
+    "nullableRelativePath": {"anyOf": [{"$ref": "#/$defs/relativePath"}, {"type": "null"}]},
     "box": {
       "type": "array",
       "prefixItems": [

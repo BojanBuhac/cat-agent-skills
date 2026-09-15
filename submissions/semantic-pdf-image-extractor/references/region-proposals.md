@@ -42,8 +42,8 @@ Create `diagnostics/region-proposals.json` after inspecting all rendered pages a
 ## Identity and Path Rules
 
 - IDs use lowercase letters, digits, and hyphens.
-- Asset IDs are globally unique in the extraction result.
-- Occurrence IDs are globally unique. Repeated appearances of one visual share an asset ID but have different occurrence IDs and crop paths.
+- Asset IDs are globally unique in the extraction result. Prefix them with the document ID, for example `annual-report-asset-0001`.
+- Occurrence IDs are globally unique. Prefix them with the document ID, for example `annual-report-occurrence-0001`. Repeated appearances of one visual share an asset ID but have different occurrence IDs and crop paths.
 - `image`, `assetOutput`, and `contextOutput` are relative paths with `/` separators.
 - Asset outputs are PNG files below `assets/<document-id>/`.
 - Context outputs are PNG files below `context/<document-id>/`.
@@ -63,3 +63,15 @@ Create a context crop when an isolated asset would lose:
 - The relationship between panels in a composite
 
 Omit it when the asset is self-contained or the context crop would be nearly identical to the full page.
+
+## Crop Results
+
+The crop command writes `diagnostics/crop-results.json` in proposal order. Each record has an
+explicit `status`:
+
+- `created` records contain the asset and optional context pixel boxes plus their quality objects.
+- `rejected` records identify an undersized candidate by asset ID, occurrence ID, document, page,
+  source page path, asset output path, pixel box, and reason. No crop file is written for that
+  record.
+
+Duplicate detection examines only `created` records.

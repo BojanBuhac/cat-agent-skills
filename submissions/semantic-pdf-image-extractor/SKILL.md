@@ -170,7 +170,9 @@ Use statuses:
 | `verified` | Boundary, classification, text association, and source agree. |
 | `best-effort` | Useful result with limited resolution or minor uncertainty. |
 | `review-required` | Ambiguous boundary, relationship, classification, duplicate group, or readability. |
-| `excluded` | Candidate intentionally omitted from packaged assets; retained only in diagnostics. |
+
+Excluded candidates belong only in `exclusions` and diagnostics. Do not represent them as packaged
+asset or occurrence statuses.
 
 ### 8. Build Manifest and Summary
 
