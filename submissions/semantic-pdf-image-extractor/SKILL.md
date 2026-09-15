@@ -132,7 +132,7 @@ Write `diagnostics/region-proposals.json` using [the region proposal contract](.
 [left, top, right, bottom]
 ```
 
-Each proposal can contain an `assetBox` and optional `contextBox`. Use stable IDs such as `asset-0001` within each document.
+Each proposal can contain an `assetBox` and optional `contextBox`. Use globally unique IDs such as `<document-id>-asset-0001` and `<document-id>-occurrence-0001`.
 
 ### 6. Crop Deterministically
 
