@@ -29,6 +29,7 @@ ATK_VALIDATION_SUCCESS_MARKER = (
 )
 MAX_PNG_BYTES = 5 * 1024 * 1024
 MAX_JSON_BYTES = 5 * 1024 * 1024
+MAX_SKILL_BYTES = 5 * 1024 * 1024
 MAX_OUTLINE_COMPRESSED_BYTES = 1024 * 1024
 PLACEHOLDER_PATTERN = re.compile(
     r"(REPLACE|PLACEHOLDER|YOUR[_-]|<[^>]+>|\{\{.+\}\})", re.IGNORECASE
@@ -520,9 +521,21 @@ def _frontmatter_field(
 
 def read_skill_metadata(skill_file: Path) -> tuple[str, str]:
     try:
-        content = skill_file.read_text(encoding="utf-8-sig")
-    except (OSError, UnicodeError) as exc:
+        with skill_file.open("rb") as input_file:
+            data = input_file.read(MAX_SKILL_BYTES + 1)
+    except OSError as exc:
         raise CoworkPluginError(f"Cannot read skill: {skill_file}: {exc}") from exc
+    if len(data) > MAX_SKILL_BYTES:
+        raise CoworkPluginError(
+            f"SKILL.md exceeds the {MAX_SKILL_BYTES} byte safety limit: "
+            f"{skill_file}"
+        )
+    try:
+        content = data.decode("utf-8-sig")
+    except UnicodeError as exc:
+        raise CoworkPluginError(
+            f"Cannot read skill: {skill_file}: {exc}"
+        ) from exc
     match = FRONTMATTER_PATTERN.match(content)
     if not match:
         raise CoworkPluginError(

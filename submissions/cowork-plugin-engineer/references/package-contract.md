@@ -26,8 +26,8 @@ methods are rejected before extraction.
 Package paths reject Windows reserved device-name segments such as `NUL`,
 `CON`, `CONIN$`, `CONOUT$`, `PRN`, `AUX`, `COM1`, and `LPT1`, including
 superscript aliases, names with extensions, and spaces before extensions.
-Manifest and tool-description JSON files are read with a 5 MB per-file safety
-limit during local validation.
+Manifest, tool-description JSON, and registered root `SKILL.md` files are read
+with a 5 MB per-file safety limit during local validation.
 
 ## Manifest invariants
 
