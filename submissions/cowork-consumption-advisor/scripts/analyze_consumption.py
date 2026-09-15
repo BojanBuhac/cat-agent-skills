@@ -32,6 +32,7 @@ import argparse
 import csv
 import datetime as dt
 import glob
+import hashlib
 import html
 import json
 import os
@@ -345,7 +346,30 @@ def pct(a, b):
     return round(a / b * 100, 1) if b else None
 
 
+def pseudonym(prefix, key, width=5):
+    h = int(hashlib.sha256(key.lower().encode("utf-8")).hexdigest()[:8], 16)
+    return f"{prefix} {str(h % (10 ** width)).zfill(width)}"
+
+
+def anonymize_data(data):
+    """Replace every personal identifier before analysis so JSON, HTML and Markdown are all masked."""
+    for u in data.get("users", []):
+        u["displayName"] = pseudonym("User", u["upnKey"])
+        u["upn"] = pseudonym("user", u["upnKey"]).replace(" ", "") + "@hidden"
+    for x in data.get("cowork_usage", []):
+        x["displayName"] = pseudonym("User", x["upnKey"])
+        x["upn"] = pseudonym("user", x["upnKey"]).replace(" ", "") + "@hidden"
+    for k, o in (data.get("org") or {}).items():
+        mk = (o.get("managerUpn") or o.get("manager") or "")
+        o["manager"] = pseudonym("Manager", mk, 4) if mk else ""
+        o["managerUpn"] = pseudonym("manager", mk, 4).replace(" ", "") + "@hidden" if mk else ""
+        o["upn"] = pseudonym("user", k).replace(" ", "") + "@hidden"
+    return data
+
+
 def analyze(data, args, as_of):
+    if args.anonymize:
+        data = anonymize_data(data)
     users = data.get("users", [])
     groups = data.get("groups", [])
     services = data.get("services", [])
@@ -378,10 +402,10 @@ def analyze(data, args, as_of):
             [x["lastActivity"] for x in usage if x["lastActivity"]]
     first_act = min(dates) if dates else None
     last_act = max(dates) if dates else None
-    period_mode = args.period
-    if period_mode == "auto":
-        span = (last_act - first_act).days if (first_act and last_act) else 0
-        period_mode = "ytd" if span > 40 else "monthly"
+    # The Consumption exports carry "Monthly credits used" - a current-billing-month snapshot - so the
+    # default is a monthly projection. --period ytd is only valid when the export really is cumulative
+    # (e.g. a YTD filter in the admin center) and then uses the calendar year, not the first activity.
+    period_mode = "monthly" if args.period == "auto" else args.period
     forecast = {"mode": period_mode}
     if period_mode == "monthly":
         start = as_of.replace(day=1)
@@ -396,8 +420,8 @@ def analyze(data, args, as_of):
             "projectedCost": round(daily * days_in * args.rate, 2),
         })
     else:
-        # accumulated view: run-rate from first observed activity to the export date
-        start = first_act or as_of
+        # explicit year-to-date view: calendar-year start to the export date
+        start = dt.date(as_of.year, 1, 1)
         elapsed_days = max(1, (as_of - start).days + 1)
         months = elapsed_days / 30.44
         daily = total / elapsed_days
@@ -407,8 +431,12 @@ def analyze(data, args, as_of):
             "dailyRunRate": round(daily), "monthlyRunRate": round(daily * 30.44),
             "annualisedCredits": round(daily * 365), "annualisedCost": round(daily * 365 * args.rate, 2),
         })
-        notes.append("Period detected as accumulated (year-to-date style) because activity spans more than 40 days; "
-                     "run-rates are computed from the earliest observed activity to the export date.")
+        notes.append(f"Year-to-date mode (--period ytd): run-rates assume the credit figures are cumulative from "
+                     f"{start.isoformat()} to {as_of.isoformat()}. Use this only for exports taken with a YTD filter.")
+    if first_act and last_act and (last_act - first_act).days > 40 and period_mode == "monthly":
+        notes.append("User last-activity dates span more than 40 days while credit figures are monthly snapshots; the "
+                     "projection covers the current billing month only. Re-run with --period ytd if the export was "
+                     "taken with a year-to-date filter.")
 
     # ---- users -------------------------------------------------------------
     users_sorted = sorted(users, key=lambda u: -u["used"])
@@ -431,7 +459,13 @@ def analyze(data, args, as_of):
               "avgUsed": round(v["used"] / v["users"]) if v["users"] else 0,
               "avgPctOfLimit": pct(v["used"] / v["users"], k) if (k and v["users"]) else None}
              for k, v in sorted(limit_tiers.items(), key=lambda kv: -(kv[0] or 0))]
-    median_used = sorted(u["used"] for u in consuming)[len(consuming) // 2] if consuming else 0
+    def median(vals):
+        vals = sorted(vals)
+        n = len(vals)
+        if not n:
+            return 0
+        return vals[n // 2] if n % 2 else round((vals[n // 2 - 1] + vals[n // 2]) / 2)
+    median_used = median(u["used"] for u in consuming)
 
     if over:
         notes.append(f"{len(over)} user(s) show usage above 100% of their current limit. This normally means the limit "
@@ -483,11 +517,17 @@ def analyze(data, args, as_of):
         u["costCenter"] = (o or {}).get("costCenter", "")
     unknown_dept = "(Unknown - not in directory)"
     departments = rollup(users, lambda u: u.get("department"), unknown_dept) if org else []
-    managers = rollup(users, lambda u: u.get("manager"), "(No manager found)") if org else []
-    countries = rollup(users, lambda u: u.get("country"), "(Unknown)") if org and any(u.get("country") for u in users) else []
+    # key managers by UPN (two managers can share a display name); label with the display name
+    mgr_label = {}
+    for u in users:
+        k = (u.get("managerUpn") or u.get("manager") or "").lower()
+        if k:
+            mgr_label.setdefault(k, u.get("manager") or u.get("managerUpn"))
+    managers = rollup(users, lambda u: (u.get("managerUpn") or u.get("manager") or "").lower(), "(No manager found)") if org else []
     for m in managers:
-        # attach manager UPN for personas / drill-down
-        m["managerUpn"] = next((u.get("managerUpn") for u in users if u.get("manager") == m["name"] and u.get("managerUpn")), "")
+        m["managerUpn"] = m["name"] if "@" in m["name"] else ""
+        m["name"] = mgr_label.get(m["name"], m["name"])
+    countries = rollup(users, lambda u: u.get("country"), "(Unknown)") if org and any(u.get("country") for u in users) else []
     if org:
         notes.append(f"Directory enrichment: {enriched} of {n_users} consuming users matched to department/manager data "
                      f"({pct(enriched, n_users)}%). Unmatched users are grouped under '{unknown_dept}'.")
@@ -514,7 +554,8 @@ def analyze(data, args, as_of):
     pol_total = sum(p["used"] for p in policies)
     unlimited = [p for p in policies if p["unlimited"] and p["status"].lower() == "active"]
     unlimited_share = pct(sum(p["used"] for p in unlimited), pol_total)
-    near_pol = [p for p in policies if p["usageRate"] is not None and p["usageRate"] >= args.near_limit * 100]
+    near_pol = [p for p in policies if p["usageRate"] is not None and p["usageRate"] >= args.near_limit * 100
+                and p["status"].lower() == "active"]
     idle_pol = [p for p in policies if p["used"] == 0 and p["status"].lower() == "active"]
     tenant_wide = [p for p in policies if p["appliesTo"].lower().startswith("all users")]
     methods = sorted({p["billingMethod"] for p in policies if p["billingMethod"]})
@@ -526,7 +567,9 @@ def analyze(data, args, as_of):
     if unlimited:
         rec("High", "Cap the unlimited spending policies",
             f"{len(unlimited)} active policies have no monthly limit and carry {unlimited_share}% of policy-attributed "
-            f"credits ({sum(p['used'] for p in unlimited):,}). All are billed pay-as-you-go, so exposure is uncapped.",
+            f"credits ({sum(p['used'] for p in unlimited):,}). "
+            + ("All are billed pay-as-you-go, so exposure is uncapped." if all("pay-as-you-go" in p["billingMethod"].lower() for p in unlimited)
+               else "Billing methods: " + ", ".join(sorted({p["billingMethod"].split(" (")[0] or "unknown" for p in unlimited})) + "."),
             "Set a policy-level monthly limit at roughly 1.3x the observed run-rate for each policy, keep per-user limits, "
             "and add alert recipients at 80%. Limits stop spend; alerts only warn.")
     if near_pol:
@@ -560,7 +603,8 @@ def analyze(data, args, as_of):
     if credits_per_task:
         hi = [u for u in joined if u.get("creditsPerTask") and u["creditsPerTask"] > 3 * credits_per_task and u["tasks"] >= 3]
         rec("Low", "Credits per task is the efficiency KPI to track",
-            f"Blended {credits_per_task:,} credits per Cowork task across {tasks_matched:,} tasks. "
+            f"Blended {credits_per_task:,} credits per Cowork task across the {tasks_matched:,} tasks of the {matched} users "
+            f"present in both exports (of {tasks_total:,} tasks in the usage export). "
             + (f"{len(hi)} users run at more than 3x that average (e.g. " + ", ".join(f"{u['displayName']} {u['creditsPerTask']:,}" for u in hi[:3]) + ")." if hi else "No extreme outliers."),
             "Publish the blended figure monthly. Coach heavy-per-task users on scoping prompts, using included Copilot Chat "
             "for single-output asks, and checking /cost inside Cowork before long-running tasks.")
@@ -615,6 +659,14 @@ def analyze(data, args, as_of):
             return o.isoformat()
         raise TypeError
 
+    def strip_keys(obj):
+        """Remove internal join keys so the JSON never carries a raw identifier when --anonymize is on."""
+        if isinstance(obj, dict):
+            return {k: strip_keys(v) for k, v in obj.items() if k != "upnKey"}
+        if isinstance(obj, list):
+            return [strip_keys(x) for x in obj]
+        return obj
+
     result = {
         "meta": {
             "title": args.title, "asOf": as_of.isoformat(), "currency": args.currency,
@@ -625,10 +677,11 @@ def analyze(data, args, as_of):
             "totalCredits": total, "prepaidCredits": prepaid, "paygCredits": payg,
             "prepaidShare": pct(prepaid, svc_total) if services else None,
             "listCost": round(list_cost, 2), "estimatedCost": round(est_cost, 2),
-            "activeUsers": len(consuming) if users else (services[0]["activeUsers"] if len(services) == 1 else None),
+            "activeUsers": (services[0]["activeUsers"] if len(services) == 1 else sum(s["activeUsers"] for s in services)) if services else len(consuming),
             "consumingUsers": len(consuming), "creditsPerActiveUser": round(user_total / len(consuming)) if consuming else None,
             "medianCreditsPerUser": median_used, "creditsPerTask": credits_per_task,
             "totalTasks": tasks_total, "scheduledTaskShare": scheduled_share,
+            "matchedTasks": tasks_matched, "matchedTaskUsers": matched,
             "firstActivity": first_act, "lastActivity": last_act,
         },
         "forecast": forecast,
@@ -651,7 +704,7 @@ def analyze(data, args, as_of):
         "recommendations": recs,
         "dataQuality": notes,
     }
-    return json.loads(json.dumps(result, default=ser))
+    return strip_keys(json.loads(json.dumps(result, default=ser)))
 
 
 # --------------------------------------------------------------------------- rendering
@@ -676,8 +729,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px 8px;t
 @media print{header{-webkit-print-color-adjust:exact}.tabs,.search{display:none}.hide{display:block!important}}
 """
 
-JS = """
-function sortTable(th){const t=th.closest('table'),i=[...th.parentNode.children].indexOf(th),tb=t.tBodies[0],rows=[...tb.rows];const num=th.classList.contains('num');const dir=th.dataset.dir==='asc'?'desc':'asc';th.dataset.dir=dir;rows.sort((a,b)=>{let x=a.cells[i].dataset.v??a.cells[i].innerText,y=b.cells[i].dataset.v??b.cells[i].innerText;if(num){x=parseFloat(x)||0;y=parseFloat(y)||0;return dir==='asc'?x-y:y-x}return dir==='asc'?x.localeCompare(y):y.localeCompare(x)});rows.forEach(r=>tb.appendChild(r))}
+JS = r"""
+function sortTable(th){const t=th.closest('table'),i=[...th.parentNode.children].indexOf(th),tb=t.tBodies[0],rows=[...tb.rows];const num=th.classList.contains('num');const dir=th.dataset.dir==='asc'?'desc':'asc';th.dataset.dir=dir;rows.sort((a,b)=>{let x=a.cells[i].dataset.v??a.cells[i].innerText,y=b.cells[i].dataset.v??b.cells[i].innerText;if(num){const n=v=>parseFloat(String(v).replace(/[^0-9.\-]/g,''))||0;x=n(x);y=n(y);return dir==='asc'?x-y:y-x}return dir==='asc'?x.localeCompare(y):y.localeCompare(x)});rows.forEach(r=>tb.appendChild(r))}
 function filterTable(inp,id){const q=inp.value.toLowerCase();document.querySelectorAll('#'+id+' tbody tr').forEach(r=>r.style.display=r.innerText.toLowerCase().includes(q)?'':'none')}
 function tab(btn,id){const p=btn.closest('.card');p.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('on'));btn.classList.add('on');p.querySelectorAll('.pane').forEach(x=>x.classList.add('hide'));p.querySelector('#'+id).classList.remove('hide')}
 """
@@ -690,7 +743,7 @@ def fmt(n, dec=0):
 
 
 def money(v, cur):
-    return "-" if v is None else f"{cur} {v:,.0f}"
+    return "-" if v is None else f"{html.escape(cur)} {v:,.0f}"
 
 
 def bar_rows(items, key, label, total=None, color=None, valfmt=None, limit_key=None):
@@ -724,12 +777,10 @@ def render_html(res, anonymize=False):
     rate = res["meta"]["paygRate"]
 
     def name(u):
-        if not anonymize:
-            return u["displayName"]
-        return "User " + str(abs(hash(u["upnKey"])) % 100000).zfill(5)
+        return u["displayName"]
 
     def upn(u):
-        return "hidden" if anonymize else u["upn"]
+        return u["upn"]
 
     # KPIs
     fc_label = ("Projected month-end" if f["mode"] == "monthly" else "Monthly run-rate")
@@ -742,7 +793,7 @@ def render_html(res, anonymize=False):
         (fc_label, fmt(fc_val), fc_sub),
         ("Active users", fmt(h["activeUsers"]), f"median {fmt(h['medianCreditsPerUser'])} credits/user"),
         ("Credits / active user", fmt(h["creditsPerActiveUser"]), "mean across consuming users"),
-        ("Credits / task", fmt(h["creditsPerTask"]), f"{fmt(h['totalTasks'])} Cowork tasks, {fmt(h['scheduledTaskShare'],1)}% scheduled" if h["totalTasks"] else "Cowork usage export not provided"),
+        ("Credits / task", fmt(h["creditsPerTask"]), f"over {fmt(h['matchedTasks'])} matched tasks ({fmt(h['totalTasks'])} total, {fmt(h['scheduledTaskShare'],1)}% scheduled)" if h["totalTasks"] else "Cowork usage export not provided"),
     ]
     kpi_html = "".join(f'<div class="kpi"><div class="l">{l}</div><div class="v">{v}</div><div class="s">{s}</div></div>' for l, v, s in kpis)
 
@@ -785,7 +836,7 @@ def render_html(res, anonymize=False):
                        f"<td class='num' data-v='{g['activationRate'] or 0}'>{'-' if g['activationRate'] is None else fmt(g['activationRate'],0)+'%'}</td><td class='num'>{fmt(g['used'])}</td><td class='num'>{fmt(g['avgPerUserPerDay'],0)}</td><td class='num'>{fmt(g['sessions'])}</td><td>{g['lastActivity'] or '-'}</td></tr>" for g in G["rows"])
         grp_html = f"""<p class="note">Users can belong to several groups, so group totals overlap ({fmt(G['sumOfGroups'])} summed vs {fmt(h['totalCredits'])} actual). Activation = members that used credits / total members.</p>
         {bar_rows(G['rows'][:8], 'used', 'name')}
-        <table style="margin-top:12px"><thead><tr><th onclick="sortTable(this)">Group</th><th class="num" onclick="sortTable(this)">Members</th><th class="num" onclick="sortTable(this)">Used credits</th><th class="num" onclick="sortTable(this)">Activation</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Avg/user/day</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Last activity</th></tr></thead><tbody>{grow}</tbody></table>"""
+        <table style="margin-top:12px"><thead><tr><th onclick="sortTable(this)">Group</th><th class="num" onclick="sortTable(this)">Members</th><th class="num" onclick="sortTable(this)">Members used</th><th class="num" onclick="sortTable(this)">Activation</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Avg/user/day</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Last activity</th></tr></thead><tbody>{grow}</tbody></table>"""
     else:
         grp_html = "<p class='note'>Groups export not provided.</p>"
 
@@ -796,14 +847,13 @@ def render_html(res, anonymize=False):
         if u["pctUsed"] is None:
             return ""
         return "bad" if u["pctUsed"] >= 100 else ("warn" if u["pctUsed"] >= 80 else "")
-    top_html = bar_rows(U["top10"], "used", "displayName", total=U["total"] or None, color=ucolor) if not anonymize else \
-        bar_rows([{**u, "displayName": name(u)} for u in U["top10"]], "used", "displayName", total=U["total"] or None, color=ucolor)
+    top_html = bar_rows(U["top10"], "used", "displayName", total=U["total"] or None, color=ucolor)
     tier_rows = "".join(f"<tr><td class='num'>{fmt(t['limit']) if t['limit'] else 'none'}</td><td class='num'>{t['users']}</td><td class='num'>{fmt(t['used'])}</td><td class='num'>{fmt(t['avgUsed'])}</td><td class='num'>{'-' if t['avgPctOfLimit'] is None else fmt(t['avgPctOfLimit'],0)+'%'}</td></tr>" for t in U["limitTiers"])
     urows = "".join(
         f"<tr><td>{html.escape(name(u))}</td><td class='note'>{html.escape(upn(u))}</td><td class='num'>{fmt(u['used'])}</td><td class='num'>{fmt(u['limit'])}</td>"
         f"<td class='num' data-v='{u['pctUsed'] or 0}'>{'-' if u['pctUsed'] is None else fmt(u['pctUsed'],0)+'%'}</td><td class='num'>{fmt(u.get('tasks'))}</td><td class='num'>{fmt(u.get('creditsPerTask'))}</td>"
         f"<td class='num'>{fmt(u['sessions'])}</td><td>{'Yes' if u['licensed'] else '<b>No</b>'}</td><td>{u['lastActivity'] or '-'}</td>"
-        f"<td>{html.escape(u.get('department') or '-')}</td><td>{html.escape((u.get('manager') or '-') if not anonymize else '-')}</td></tr>" for u in U["all"])
+        f"<td>{html.escape(u.get('department') or '-')}</td><td>{html.escape(u.get('manager') or '-')}</td></tr>" for u in U["all"])
     watch = (f"<b>{len(U['overLimit'])}</b> over limit &middot; <b>{len(U['nearLimit'])}</b> near limit (&ge;80%) &middot; "
              f"<b>{len(U['dormant'])}</b> dormant &middot; <b>{len(U['unlicensed'])}</b> unlicensed consumers")
     users_html = f"""<p class="note">Top 10 users = {fmt(U['top10Share'],1)}% of credits; top {U['top20pctCount']} users (20% of consumers) = {fmt(U['top20pctShare'],1)}%. Watchlist: {watch}.</p>
@@ -819,7 +869,7 @@ def render_html(res, anonymize=False):
         tr = "".join(
             f"<tr><td>{html.escape(r['name'])}</td><td class='num'>{r['users']}</td><td class='num'>{r['consuming']}</td><td class='num'>{fmt(r['used'])}</td>"
             f"<td class='num' data-v='{r['share']}'>{fmt(r['share'],1)}%</td><td class='num'>{fmt(r['avgPerUser'])}</td><td class='num'>{fmt(r['tasks']) if r['tasks'] else '-'}</td>"
-            f"<td class='num'>{fmt(r['creditsPerTask'])}</td><td class='num'>{r['nearOrOver']}</td><td>{html.escape(name({'displayName': r['topUser'], 'upnKey': r['topUser']}))}</td></tr>" for r in rows)
+            f"<td class='num'>{fmt(r['creditsPerTask'])}</td><td class='num'>{r['nearOrOver']}</td><td>{html.escape(r['topUser'])}</td></tr>" for r in rows)
         return (f"<table><thead><tr><th onclick=\"sortTable(this)\">{first_label}</th><th class='num' onclick=\"sortTable(this)\">Users</th><th class='num' onclick=\"sortTable(this)\">Consuming</th>"
                 f"<th class='num' onclick=\"sortTable(this)\">Credits</th><th class='num' onclick=\"sortTable(this)\">Share</th><th class='num' onclick=\"sortTable(this)\">Avg / user</th><th class='num' onclick=\"sortTable(this)\">Tasks</th>"
                 f"<th class='num' onclick=\"sortTable(this)\">Credits / task</th><th class='num' onclick=\"sortTable(this)\">Near/over limit</th><th onclick=\"sortTable(this)\">Top user</th></tr></thead><tbody>{tr}</tbody></table>")
@@ -828,7 +878,7 @@ def render_html(res, anonymize=False):
         def dcolor(r):
             return "warn" if r["name"].startswith("(") else ""
         dept_rows = O["departments"]
-        mgr_rows = [{**m, "name": (m["name"] if (not anonymize or m["name"].startswith("(")) else "Manager " + str(abs(hash(m["name"])) % 10000).zfill(4))} for m in O["managers"]]
+        mgr_rows = O["managers"]
         dept_html = f"""<p class="note">Directory coverage: {O['enrichedUsers']} of {res['users']['count']} consuming users matched ({fmt(O['coverage'],0)}%). Source: Microsoft Graph user profiles (department, manager) or an Entra user export.</p>
         {bar_rows(dept_rows[:10], 'used', 'name', total=res['users']['total'] or None, color=dcolor)}
         <div style="margin-top:12px">{org_table(dept_rows, 'Department')}</div>"""
@@ -858,6 +908,7 @@ def render_html(res, anonymize=False):
                    f"<b>{fmt(f['dailyRunRate'])}/day</b>, <b>{fmt(f['monthlyRunRate'])}/month</b>, annualised <b>{fmt(f['annualisedCredits'])}</b> credits "
                    f"(~{money(f['annualisedCost'], cur)} at list rate).</p>")
     fc_html += "<p class='note'>Run-rates are straight-line on observed data and assume no policy changes. Use them for sizing capacity packs, not as an invoice.</p>"
+    fc_html += f"<p class='note'>Credits-per-task uses the {fmt(h.get('matchedTaskUsers'))} users present in both the consumption and usage exports ({fmt(h.get('matchedTasks'))} of {fmt(h.get('totalTasks'))} tasks).</p>" if h.get("matchedTasks") else ""
 
     dq = "".join(f"<li>{html.escape(n)}</li>" for n in res["dataQuality"])
     inputs = "".join(f"<li>{html.escape(k)}: {html.escape(os.path.basename(v))}</li>" for k, v in res["meta"]["inputs"].items())
@@ -889,7 +940,7 @@ def render_md(res):
              f"- **Estimated cost:** {money(h['estimatedCost'], cur)} (list {money(h['listCost'], cur)})",
              f"- **Active users:** {fmt(h['activeUsers'])} - {fmt(h['creditsPerActiveUser'])} credits per active user, median {fmt(h['medianCreditsPerUser'])}"]
     if h["creditsPerTask"]:
-        lines.append(f"- **Credits per task:** {fmt(h['creditsPerTask'])} across {fmt(h['totalTasks'])} Cowork tasks ({fmt(h['scheduledTaskShare'],1)}% scheduled)")
+        lines.append(f"- **Credits per task:** {fmt(h['creditsPerTask'])} over {fmt(h['matchedTasks'])} tasks of users in both exports ({fmt(h['totalTasks'])} Cowork tasks in total, {fmt(h['scheduledTaskShare'],1)}% scheduled)")
     if f["mode"] == "monthly":
         lines.append(f"- **Forecast:** {fmt(f['projectedPeriodTotal'])} credits by {f['periodEnd']} (~{money(f['projectedCost'], cur)})")
     else:
@@ -926,15 +977,20 @@ def main(argv=None):
     ap.add_argument("--org", nargs="*", default=[], help="directory data: Graph user JSON files/folders and/or org CSV (UPN, Department, Manager...)")
     ap.add_argument("--rate", type=float, default=0.01, help="pay-as-you-go list price per credit (default 0.01)")
     ap.add_argument("--prepaid-rate", type=float, default=0.008, help="effective prepaid price per credit (default 0.008 = 200/25,000 pack)")
-    ap.add_argument("--currency", default="USD")
+    ap.add_argument("--currency", default="USD", help="ISO 4217 code, e.g. USD, EUR, CHF")
     ap.add_argument("--period", choices=["auto", "monthly", "ytd"], default="auto")
     ap.add_argument("--as-of", help="report date YYYY-MM-DD (default: latest date in the exports, else today)")
     ap.add_argument("--near-limit", type=float, default=0.8)
     ap.add_argument("--dormant-days", type=int, default=30)
     ap.add_argument("--title", default="Cowork & Work IQ Consumption Report")
-    ap.add_argument("--anonymize", action="store_true", help="hide user names and UPNs in the HTML")
+    ap.add_argument("--anonymize", action="store_true",
+                    help="replace user and manager names/UPNs with stable pseudonyms in ALL outputs (HTML, JSON, Markdown)")
     args = ap.parse_args(argv)
 
+    if not re.fullmatch(r"[A-Za-z]{3}", args.currency):
+        print("ERROR: --currency must be a 3-letter ISO 4217 code (e.g. USD, EUR)", file=sys.stderr)
+        return 2
+    args.currency = args.currency.upper()
     files = collect_inputs(args.input, exts=(".csv", ".json"))
     json_files = [f for f in files if f.lower().endswith(".json")]
     files = [f for f in files if not f.lower().endswith(".json")]
