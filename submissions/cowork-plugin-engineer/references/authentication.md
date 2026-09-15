@@ -9,11 +9,22 @@ configuration is missing or invalid.
 | Server behavior | Manifest configuration | Required setup |
 |---|---|---|
 | Anonymous endpoint | `authorization.type: None` | No `referenceId` |
-| OAuth server with RFC 7591 registration endpoint | Dynamic registration supported by the current schema | Server registration endpoint |
+| OAuth server with RFC 7591 registration endpoint | Omit `authorization` for Cowork-managed DCR, or use `DynamicClientRegistration` with a valid `referenceId` | Server registration endpoint; auth configuration when using an explicit reference |
 | OAuth server without dynamic registration | `OAuthPluginVault` | Provider app plus Enterprise Token Store auth config |
 | Microsoft Entra protected endpoint | `OAuthPluginVault` | Static Entra app and OAuth client registration |
 
 Microsoft Entra ID does not publish a Dynamic Client Registration endpoint.
+
+The current Cowork guidance describes automatic DCR when `authorization` is
+omitted. The v1.28 manifest schema also permits an explicit
+`DynamicClientRegistration` authorization object and requires its
+`referenceId`. The local validator accepts both forms. Do not use DCR for
+Microsoft Entra-protected MCP servers.
+
+API key authentication is represented by `ApiKeyPluginVault` in the manifest
+schema, but current Cowork guidance says it is not yet available in the host.
+The deployable-package validator therefore rejects it until that rollout
+status changes.
 Do not choose DCR for an Entra-protected MCP server.
 
 ## Discovery

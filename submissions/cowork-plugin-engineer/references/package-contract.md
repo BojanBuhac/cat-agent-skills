@@ -60,6 +60,7 @@ limit during local validation.
 
 ## Connector invariants
 
+- At most 10 connectors.
 - Connector IDs are unique.
 - Remote MCP URLs use HTTPS and Streamable HTTP.
 - Do not invent tool descriptions. Capture them from MCP `tools/list`.
@@ -79,10 +80,11 @@ limit during local validation.
 - `None` has no `referenceId`.
 - `OAuthPluginVault` has the generated OAuth client registration ID, never a
   human-readable placeholder.
-- Dynamic Client Registration is represented by omitting `authorization`, not
-  by declaring a `DynamicClientRegistration` authorization type.
-- API key authentication is not treated as deployable unless current Cowork
-  documentation explicitly supports it.
+- Cowork-managed Dynamic Client Registration can omit `authorization`.
+  An explicit schema-valid `DynamicClientRegistration` object instead requires
+  a non-placeholder `referenceId`.
+- `ApiKeyPluginVault` is schema-valid but is not treated as deployable while
+  current Cowork guidance says API key authentication is unavailable.
 
 ## Acceptance gate
 

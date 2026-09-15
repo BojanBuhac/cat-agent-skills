@@ -910,39 +910,44 @@ def _validate_connector_authorization(
         "type",
         f"connector '{connector_id}' auth type",
     )
+    has_reference_id = "referenceId" in authorization
     reference_id = get_property(authorization, "referenceId")
-    if reference_id is not None and not isinstance(reference_id, str):
+    if has_reference_id and not isinstance(reference_id, str):
         raise CoworkPluginError(
             f"Connector '{connector_id}' referenceId must be text."
         )
     reference_id = reference_id or ""
     if auth_type == "None":
-        if reference_id.strip():
+        if has_reference_id:
             raise CoworkPluginError(
                 f"Connector '{connector_id}' uses None and must omit "
                 "referenceId."
             )
-    elif auth_type == "OAuthPluginVault":
+    elif auth_type in {"OAuthPluginVault", "DynamicClientRegistration"}:
         if not reference_id.strip():
             raise CoworkPluginError(
-                f"Connector '{connector_id}' requires an OAuth referenceId."
+                f"Connector '{connector_id}' requires a referenceId for "
+                f"{auth_type}."
             )
-        if not allow_oauth_placeholder and is_oauth_placeholder(
+        if len(reference_id) > 128:
+            raise CoworkPluginError(
+                f"Connector '{connector_id}' referenceId must not exceed "
+                "128 characters."
+            )
+        placeholder_allowed = (
+            auth_type == "OAuthPluginVault" and allow_oauth_placeholder
+        )
+        if not placeholder_allowed and is_oauth_placeholder(
             reference_id, connector_id
         ):
             raise CoworkPluginError(
-                f"Connector '{connector_id}' has unresolved OAuth placeholder "
+                f"Connector '{connector_id}' has unresolved auth placeholder "
                 f"'{reference_id}'."
             )
     elif auth_type == "ApiKeyPluginVault":
         raise CoworkPluginError(
             "ApiKeyPluginVault is not currently a deployable Cowork connector "
             "authentication type."
-        )
-    elif auth_type == "DynamicClientRegistration":
-        raise CoworkPluginError(
-            f"Connector '{connector_id}' must omit authorization to use "
-            "Dynamic Client Registration."
         )
     else:
         raise CoworkPluginError(
@@ -1069,6 +1074,11 @@ def validate_project(
     if len(skills) > 20:
         raise CoworkPluginError(
             f"A maximum of 20 registered skills is supported; found {len(skills)}."
+        )
+    if len(connectors) > 10:
+        raise CoworkPluginError(
+            "A maximum of 10 agent connectors is supported; found "
+            f"{len(connectors)}."
         )
 
     skill_names: set[str] = set()
