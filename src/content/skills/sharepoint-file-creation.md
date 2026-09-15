@@ -1,15 +1,15 @@
 ---
 name: SharePoint File Creation
-description: "Generate a requested file, enforce a safe pre-upload size gate, upload it to SharePoint without streaming bytes through the model, and verify the result."
+description: "Generate a requested file, enforce a safe pre-upload size gate, and upload it to SharePoint without streaming bytes through the model."
 agentDescription: "Source/generate the requested file using whatever content rules apply to the use case, gate it against an evidence-based pre-upload size threshold using the filesystem API, and upload it to SharePoint via the Create file tool's confirmed /app/created/ path-reference mechanism — without ever streaming raw file bytes through the LLM. Use this skill whenever a request asks for a file to be produced and uploaded to SharePoint, whether or not the user specifies a path, filename, format, or content source."
 platforms: [Copilot Studio]
-tags: [sharepoint, files, upload, microsoft-365, verification]
+tags: [sharepoint, files, upload, microsoft-365]
 author: Lewis Baybutt
 authorUrl: "https://github.com/lewisdoesdev"
 authorGithub: lewisdoesdev
-version: 1.0.0
+version: 1.0.1
 createdAt: 2026-09-14
-updatedAt: 2026-09-14
+updatedAt: 2026-09-15
 ---
 ## Quick reference — the fixed sequence
 
@@ -88,9 +88,6 @@ measured size, and content source in the final report for transparency. Fall bac
 explicit pre-upload confirmation step only when the request is ambiguous about whether upload
 was actually wanted, the destination is not already fixed/configured, or the content touches
 anything sensitive.
-
-Never overwrite an existing file; if the chosen filename collides, generate a new unique name
-rather than setting overwrite unless the user explicitly asked to replace a named file.
 
 ## 4. Report
 
