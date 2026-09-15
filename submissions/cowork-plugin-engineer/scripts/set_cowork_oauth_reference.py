@@ -29,6 +29,15 @@ def set_oauth_reference(
     no_version_bump: bool = False,
     dry_run: bool = False,
 ) -> dict[str, object]:
+    if (
+        not isinstance(oauth_configuration_id, str)
+        or not oauth_configuration_id.strip()
+    ):
+        raise CoworkPluginError("OAuth configuration ID must be non-empty text.")
+    if len(oauth_configuration_id) > 128:
+        raise CoworkPluginError(
+            "OAuth configuration ID must not exceed 128 characters."
+        )
     if is_oauth_placeholder(oauth_configuration_id, connector_id):
         raise CoworkPluginError(
             "OAuth configuration ID appears to be a placeholder. Use the "

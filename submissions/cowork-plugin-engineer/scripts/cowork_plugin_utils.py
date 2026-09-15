@@ -72,6 +72,19 @@ YAML_DATE_PATTERN = re.compile(
     r"(?:[Tt ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
     r"(?:[ \t]*(?:Z|[+-]\d{1,2}(?::?\d{2})?))?)?"
 )
+WINDOWS_RESERVED_CHARS = frozenset('<>:"|?*')
+WINDOWS_RESERVED_NAMES = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "CONIN$",
+        "CONOUT$",
+        *(f"COM{suffix}" for suffix in "123456789\u00b9\u00b2\u00b3"),
+        *(f"LPT{suffix}" for suffix in "123456789\u00b9\u00b2\u00b3"),
+    }
+)
 MANIFEST_VERSION_POLICIES = {
     "1.28": {
         "schema_segment": "v1.28",
@@ -209,6 +222,19 @@ def validate_https(value: str, label: str) -> None:
         ) from exc
 
 
+def _is_windows_reserved_segment(segment: str) -> bool:
+    if (
+        segment.endswith((".", " "))
+        or any(
+            ord(character) < 32 or character in WINDOWS_RESERVED_CHARS
+            for character in segment
+        )
+    ):
+        return True
+    device_stem = segment.partition(".")[0].rstrip(" ").upper()
+    return device_stem in WINDOWS_RESERVED_NAMES
+
+
 def normalize_manifest_path(relative_path: str, label: str) -> PurePosixPath:
     if not isinstance(relative_path, str) or not relative_path.strip():
         raise CoworkPluginError(f"{label} is required.")
@@ -231,8 +257,7 @@ def normalize_manifest_path(relative_path: str, label: str) -> PurePosixPath:
         )
     if (
         ":" in normalized
-        or any(part.endswith((".", " ")) for part in parts)
-        or any(ord(character) < 32 for character in normalized)
+        or any(_is_windows_reserved_segment(part) for part in parts)
     ):
         raise CoworkPluginError(
             f"{label} uses a ZIP-unsafe or Windows-ambiguous path: "
@@ -1335,13 +1360,9 @@ def _validate_zip_entry_name(name: str, seen: set[str]) -> str:
             f"ZIP entry escapes or ambiguously addresses the package root: "
             f"{normalized}"
         )
-    if any(segment.endswith((".", " ")) for segment in segments):
+    if any(_is_windows_reserved_segment(segment) for segment in segments):
         raise CoworkPluginError(
-            f"ZIP entry has a Windows-ambiguous path: {normalized}"
-        )
-    if any(ord(character) < 32 for character in normalized):
-        raise CoworkPluginError(
-            f"ZIP entry contains a control character: {normalized!r}"
+            f"ZIP entry uses a reserved or ambiguous Windows path: {normalized}"
         )
     duplicate_key = path_without_slash.casefold()
     if duplicate_key in seen:

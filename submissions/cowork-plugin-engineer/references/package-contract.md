@@ -23,6 +23,9 @@ plugin.zip
 The ZIP must not contain a wrapper directory.
 Package entries must use ZIP Store or Deflate compression; other compression
 methods are rejected before extraction.
+Package paths reject Windows reserved device-name segments such as `NUL`,
+`CON`, `CONIN$`, `CONOUT$`, `PRN`, `AUX`, `COM1`, and `LPT1`, including
+superscript aliases, names with extensions, and spaces before extensions.
 Manifest and tool-description JSON files are read with a 5 MB per-file safety
 limit during local validation.
 
@@ -79,7 +82,7 @@ limit during local validation.
   meta-validation or proof that inputs will work against the server.
 - `None` has no `referenceId`.
 - `OAuthPluginVault` has the generated OAuth client registration ID, never a
-  human-readable placeholder.
+  human-readable placeholder, and the ID does not exceed 128 characters.
 - Cowork-managed Dynamic Client Registration can omit `authorization`.
   An explicit schema-valid `DynamicClientRegistration` object instead requires
   a non-placeholder `referenceId`.
