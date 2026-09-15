@@ -26,7 +26,8 @@ methods are rejected before extraction.
 
 ## Manifest invariants
 
-- `$schema` and `manifestVersion` identify the same numbered schema.
+- `$schema` and `manifestVersion` identify the same supported schema:
+  `v1.28`/`1.28` or `vDevPreview`/`devPreview`.
 - `id` is a stable GUID and does not change across releases.
 - `version` is a three-part semantic version and increases for each update.
 - Developer website, privacy, and terms URLs use HTTPS. Prefer the same domain.
@@ -60,7 +61,9 @@ methods are rejected before extraction.
 - Connector IDs are unique.
 - Remote MCP URLs use HTTPS and Streamable HTTP.
 - Do not invent tool descriptions. Capture them from MCP `tools/list`.
-- Every remote connector includes `mcpToolDescription.file`.
+- Every v1.28 remote connector includes `mcpToolDescription.file`.
+- A `devPreview` connector may omit `mcpToolDescription` for dynamic tool
+  discovery. Draft evaluation generation still requires a static description.
 - The tool-description path is package-relative. Both `tools/file.json` and
   `./tools/file.json` resolve within the package root.
 - The tool-description file exists in the ZIP and contains unique tool names,
@@ -93,8 +96,9 @@ The package is complete only when:
 
 For a ZIP supplied without its source project, run
 `scripts/test_cowork_plugin_package.py`. It rejects unsafe archive paths and
-wrapper directories before extraction, applies the same deep package checks,
-and runs Agents Toolkit validation.
+wrapper directories before extraction, rebuilds a sanitized archive from the
+validated files, applies the same deep package checks, and runs Agents Toolkit
+validation only against that sanitized archive.
 
 `--skip-toolkit-validation` is for local diagnostics when Toolkit execution is
 unavailable. It reports `LocalChecksOnly` and is never a deployable-package

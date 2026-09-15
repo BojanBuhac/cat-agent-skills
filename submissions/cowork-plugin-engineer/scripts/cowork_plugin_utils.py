@@ -11,6 +11,7 @@ import re
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import uuid
 import zipfile
@@ -23,6 +24,9 @@ from urllib.parse import urlparse
 
 ATK_VERSION = "1.1.15"
 DEFAULT_ATK_REGISTRY = "https://registry.npmjs.org/"
+ATK_VALIDATION_SUCCESS_MARKER = (
+    "Microsoft 365 Agents Toolkit has checked against all validation rules:"
+)
 MAX_PNG_BYTES = 5 * 1024 * 1024
 MAX_OUTLINE_COMPRESSED_BYTES = 1024 * 1024
 PLACEHOLDER_PATTERN = re.compile(
@@ -67,6 +71,16 @@ YAML_DATE_PATTERN = re.compile(
     r"(?:[Tt ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
     r"(?:[ \t]*(?:Z|[+-]\d{1,2}(?::?\d{2})?))?)?"
 )
+MANIFEST_VERSION_POLICIES = {
+    "1.28": {
+        "schema_segment": "v1.28",
+        "requires_tool_description": True,
+    },
+    "devPreview": {
+        "schema_segment": "vDevPreview",
+        "requires_tool_description": False,
+    },
+}
 
 
 class CoworkPluginError(ValueError):
@@ -403,41 +417,50 @@ def _frontmatter_field(
             f"SKILL.md {name} has unsupported block YAML: {skill_file}"
         )
 
-    if raw_value.startswith('"') or raw_value.endswith('"'):
-        if not (raw_value.startswith('"') and raw_value.endswith('"')):
-            raise CoworkPluginError(
-                f"SKILL.md {name} has invalid double-quoted YAML: {skill_file}"
-            )
+    if raw_value.startswith('"'):
         try:
-            value = json.loads(raw_value)
+            value, end = json.JSONDecoder().raw_decode(raw_value)
         except json.JSONDecodeError as exc:
             raise CoworkPluginError(
                 f"SKILL.md {name} has invalid double-quoted YAML: {skill_file}"
             ) from exc
-        if not isinstance(value, str):
+        remainder = raw_value[end:]
+        if (
+            not isinstance(value, str)
+            or (remainder and not re.fullmatch(r"\s+#.*", remainder))
+        ):
             raise CoworkPluginError(
-                f"SKILL.md {name} must be text: {skill_file}"
+                f"SKILL.md {name} has invalid double-quoted YAML: {skill_file}"
             )
         return value
+    if raw_value.endswith('"'):
+        raise CoworkPluginError(
+            f"SKILL.md {name} has invalid double-quoted YAML: {skill_file}"
+        )
 
-    if raw_value.startswith("'") or raw_value.endswith("'"):
-        if not (raw_value.startswith("'") and raw_value.endswith("'")):
-            raise CoworkPluginError(
-                f"SKILL.md {name} has invalid single-quoted YAML: {skill_file}"
-            )
-        inner = raw_value[1:-1]
+    if raw_value.startswith("'"):
         index = 0
-        while index < len(inner):
-            if inner[index] != "'":
+        value_parts: list[str] = []
+        while index + 1 < len(raw_value):
+            index += 1
+            if raw_value[index] != "'":
+                value_parts.append(raw_value[index])
+                continue
+            if index + 1 < len(raw_value) and raw_value[index + 1] == "'":
+                value_parts.append("'")
                 index += 1
                 continue
-            if index + 1 >= len(inner) or inner[index + 1] != "'":
-                raise CoworkPluginError(
-                    f"SKILL.md {name} has invalid single-quoted YAML: "
-                    f"{skill_file}"
-                )
-            index += 2
-        return inner.replace("''", "'")
+            remainder = raw_value[index + 1 :]
+            if remainder and not re.fullmatch(r"\s+#.*", remainder):
+                break
+            return "".join(value_parts)
+        raise CoworkPluginError(
+            f"SKILL.md {name} has invalid single-quoted YAML: {skill_file}"
+        )
+    if raw_value.endswith("'"):
+        raise CoworkPluginError(
+            f"SKILL.md {name} has invalid single-quoted YAML: {skill_file}"
+        )
 
     value = re.sub(r"\s+#.*$", "", raw_value).strip()
     if (
@@ -863,6 +886,63 @@ def _iter_files(root: Path) -> Iterable[Path]:
             yield path
 
 
+def _validate_connector_authorization(
+    remote: dict[str, Any],
+    connector_id: str,
+    allow_oauth_placeholder: bool,
+) -> None:
+    authorization = get_property(remote, "authorization")
+    if authorization is None:
+        return
+    authorization = as_object(
+        authorization, f"connector '{connector_id}' authorization"
+    )
+    auth_type = required_text(
+        authorization,
+        "type",
+        f"connector '{connector_id}' auth type",
+    )
+    reference_id = get_property(authorization, "referenceId")
+    if reference_id is not None and not isinstance(reference_id, str):
+        raise CoworkPluginError(
+            f"Connector '{connector_id}' referenceId must be text."
+        )
+    reference_id = reference_id or ""
+    if auth_type == "None":
+        if reference_id.strip():
+            raise CoworkPluginError(
+                f"Connector '{connector_id}' uses None and must omit "
+                "referenceId."
+            )
+    elif auth_type == "OAuthPluginVault":
+        if not reference_id.strip():
+            raise CoworkPluginError(
+                f"Connector '{connector_id}' requires an OAuth referenceId."
+            )
+        if not allow_oauth_placeholder and is_oauth_placeholder(
+            reference_id, connector_id
+        ):
+            raise CoworkPluginError(
+                f"Connector '{connector_id}' has unresolved OAuth placeholder "
+                f"'{reference_id}'."
+            )
+    elif auth_type == "ApiKeyPluginVault":
+        raise CoworkPluginError(
+            "ApiKeyPluginVault is not currently a deployable Cowork connector "
+            "authentication type."
+        )
+    elif auth_type == "DynamicClientRegistration":
+        raise CoworkPluginError(
+            f"Connector '{connector_id}' must omit authorization to use "
+            "Dynamic Client Registration."
+        )
+    else:
+        raise CoworkPluginError(
+            f"Connector '{connector_id}' uses unsupported auth type "
+            f"'{auth_type}'."
+        )
+
+
 def validate_project(
     project_path: str | Path,
     package_path: str | Path | None = None,
@@ -899,8 +979,15 @@ def validate_project(
     manifest_version = required_text(
         manifest, "manifestVersion", "manifestVersion"
     )
+    version_policy = MANIFEST_VERSION_POLICIES.get(manifest_version)
+    if version_policy is None:
+        supported = ", ".join(MANIFEST_VERSION_POLICIES)
+        raise CoworkPluginError(
+            f"manifestVersion must be one of: {supported}."
+        )
     schema = required_text(manifest, "$schema", "$schema")
-    if not re.search(rf"/v{re.escape(manifest_version)}/", schema):
+    schema_segment = str(version_policy["schema_segment"])
+    if f"/{schema_segment}/" not in urlparse(schema).path:
         raise CoworkPluginError(
             f"$schema and manifestVersion do not match: {schema} / "
             f"{manifest_version}"
@@ -926,10 +1013,12 @@ def validate_project(
 
     name = as_object(get_property(manifest, "name"), "name")
     required_text(name, "short", "name.short")
+    required_text(name, "full", "name.full")
     description = as_object(
         get_property(manifest, "description"), "description"
     )
     required_text(description, "short", "description.short")
+    required_text(description, "full", "description.full")
 
     developer = as_object(get_property(manifest, "developer"), "developer")
     required_text(developer, "name", "developer.name")
@@ -1063,9 +1152,20 @@ def validate_project(
             remote, "mcpServerUrl", f"connector '{connector_id}' URL"
         )
         validate_https(server_url, f"Connector '{connector_id}'")
+        _validate_connector_authorization(
+            remote, connector_id, allow_oauth_placeholder
+        )
 
+        tool_description_value = get_property(remote, "mcpToolDescription")
+        if tool_description_value is None:
+            if version_policy["requires_tool_description"]:
+                raise CoworkPluginError(
+                    f"Connector '{connector_id}' mcpToolDescription is "
+                    f"required for manifestVersion {manifest_version}."
+                )
+            continue
         tool_description = as_object(
-            get_property(remote, "mcpToolDescription"),
+            tool_description_value,
             f"Connector '{connector_id}' mcpToolDescription",
         )
         tool_file = required_text(
@@ -1146,57 +1246,6 @@ def validate_project(
                     f"{tool_name}"
                 )
             tool_names.add(normalized_tool_name)
-
-        authorization = get_property(remote, "authorization")
-        if authorization is not None:
-            authorization = as_object(
-                authorization, f"connector '{connector_id}' authorization"
-            )
-            auth_type = required_text(
-                authorization,
-                "type",
-                f"connector '{connector_id}' auth type",
-            )
-            reference_id = get_property(authorization, "referenceId")
-            if reference_id is not None and not isinstance(reference_id, str):
-                raise CoworkPluginError(
-                    f"Connector '{connector_id}' referenceId must be text."
-                )
-            reference_id = reference_id or ""
-            if auth_type == "None":
-                if reference_id.strip():
-                    raise CoworkPluginError(
-                        f"Connector '{connector_id}' uses None and must omit "
-                        "referenceId."
-                    )
-            elif auth_type == "OAuthPluginVault":
-                if not reference_id.strip():
-                    raise CoworkPluginError(
-                        f"Connector '{connector_id}' requires an OAuth "
-                        "referenceId."
-                    )
-                if not allow_oauth_placeholder and is_oauth_placeholder(
-                    reference_id, connector_id
-                ):
-                    raise CoworkPluginError(
-                        f"Connector '{connector_id}' has unresolved OAuth "
-                        f"placeholder '{reference_id}'."
-                    )
-            elif auth_type == "ApiKeyPluginVault":
-                raise CoworkPluginError(
-                    "ApiKeyPluginVault is not currently a deployable Cowork "
-                    "connector authentication type."
-                )
-            elif auth_type == "DynamicClientRegistration":
-                raise CoworkPluginError(
-                    f"Connector '{connector_id}' must omit authorization to "
-                    "use Dynamic Client Registration."
-                )
-            else:
-                raise CoworkPluginError(
-                    f"Connector '{connector_id}' uses unsupported auth type "
-                    f"'{auth_type}'."
-                )
 
     if package_path is not None:
         package = Path(package_path).expanduser().resolve(strict=True)
@@ -1287,6 +1336,7 @@ def inspect_zip(
     package_path: str | Path,
     extraction_root: Path,
     max_entries: int = 1000,
+    max_archive_bytes: int = 300 * 1024 * 1024,
     max_extracted_bytes: int = 250 * 1024 * 1024,
 ) -> tuple[int, int]:
     package = Path(package_path).expanduser().resolve(strict=True)
@@ -1294,6 +1344,15 @@ def inspect_zip(
         raise CoworkPluginError(f"Package must be a ZIP file: {package}")
     if max_entries < 1 or max_entries > 5000:
         raise CoworkPluginError("max_entries must be between 1 and 5000.")
+    if max_archive_bytes < 1024 * 1024 or max_archive_bytes > 1024 * 1024 * 1024:
+        raise CoworkPluginError(
+            "max_archive_bytes must be between 1 MB and 1 GB."
+        )
+    archive_bytes = package.stat().st_size
+    if archive_bytes > max_archive_bytes:
+        raise CoworkPluginError(
+            f"ZIP is {archive_bytes} bytes; maximum is {max_archive_bytes}."
+        )
     if (
         max_extracted_bytes < 1024 * 1024
         or max_extracted_bytes > 1024 * 1024 * 1024
@@ -1394,6 +1453,39 @@ def inspect_zip(
                 "ZIP extracted size does not match its declared size."
             )
     return len(validated), actual_total
+
+
+def create_sanitized_zip(extraction_root: Path, output_path: Path) -> None:
+    root = extraction_root.resolve(strict=True)
+    _reject_symlinks(root)
+    files = sorted(
+        (path for path in _iter_files(root)),
+        key=lambda path: path.relative_to(root).as_posix(),
+    )
+    if not files:
+        raise CoworkPluginError("Cannot rebuild an empty plugin package.")
+    try:
+        with zipfile.ZipFile(
+            output_path,
+            mode="x",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+        ) as archive:
+            for source in files:
+                relative = source.relative_to(root).as_posix()
+                info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.create_system = 3
+                info.external_attr = (stat.S_IFREG | 0o644) << 16
+                with source.open("rb") as input_file, archive.open(
+                    info, mode="w"
+                ) as output_file:
+                    while chunk := input_file.read(64 * 1024):
+                        output_file.write(chunk)
+    except (OSError, RuntimeError, ValueError, zipfile.BadZipFile) as exc:
+        raise CoworkPluginError(
+            f"Cannot rebuild sanitized ZIP: {output_path}: {exc}"
+        ) from exc
 
 
 def _is_within(path: Path, roots: Iterable[Path]) -> bool:
@@ -1561,13 +1653,30 @@ def run_atk(
                 env=environment,
                 check=False,
                 shell=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except OSError as exc:
             raise CoworkPluginError(f"Cannot start npx: {exc}") from exc
+    if completed.stdout:
+        print(completed.stdout, end="")
+    if completed.stderr:
+        print(completed.stderr, end="", file=sys.stderr)
     if completed.returncode:
         operation = arguments[0] if arguments else "command"
         raise CoworkPluginError(
             f"atk {operation} failed with exit code {completed.returncode}."
+        )
+    if (
+        arguments
+        and arguments[0] == "validate"
+        and ATK_VALIDATION_SUCCESS_MARKER not in completed.stdout
+    ):
+        raise CoworkPluginError(
+            "atk validate did not confirm that Partner Center validation "
+            "completed. Treating the package as unvalidated."
         )
 
 

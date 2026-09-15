@@ -23,6 +23,62 @@ from cowork_plugin_utils import (
     write_json,
 )
 
+EVALUATION_EXTENSION = "com.microsoft.cowork-plugin-engineer"
+EVALUATION_ITEM_KEYS = {
+    "prompt",
+    "expected_response",
+    "tags",
+    "extensions",
+}
+
+
+def draft_item(
+    prompt: str,
+    expected_response: str,
+    test_id: str,
+    category: str,
+    notes: str,
+) -> dict[str, Any]:
+    return {
+        "prompt": prompt,
+        "expected_response": expected_response,
+        "tags": [category],
+        "extensions": {
+            EVALUATION_EXTENSION: {
+                "testId": test_id,
+                "notes": notes,
+            }
+        },
+    }
+
+
+def validate_evaluation_document(document: dict[str, Any]) -> None:
+    items = document.get("items")
+    if document.get("schemaVersion") != "1.6.0" or not isinstance(items, list):
+        raise CoworkPluginError("Generated evaluation document is malformed.")
+    for index, item in enumerate(items):
+        if not isinstance(item, dict) or set(item) - EVALUATION_ITEM_KEYS:
+            raise CoworkPluginError(
+                f"Generated evaluation item {index + 1} has unsupported fields."
+            )
+        if not isinstance(item.get("prompt"), str) or not item["prompt"]:
+            raise CoworkPluginError(
+                f"Generated evaluation item {index + 1} has no prompt."
+            )
+        if not isinstance(item.get("tags"), list) or not all(
+            isinstance(tag, str) for tag in item["tags"]
+        ):
+            raise CoworkPluginError(
+                f"Generated evaluation item {index + 1} has invalid tags."
+            )
+        extension = item.get("extensions")
+        if not isinstance(extension, dict) or not isinstance(
+            extension.get(EVALUATION_EXTENSION), dict
+        ):
+            raise CoworkPluginError(
+                f"Generated evaluation item {index + 1} has invalid extensions."
+            )
+
 
 def generate_evaluations(
     project_path: str | Path,
@@ -57,47 +113,47 @@ def generate_evaluations(
         prefix = f"SKILL-{skill_index:03d}"
         items.extend(
             [
-                {
-                    "prompt": (
+                draft_item(
+                    prompt=(
                         f"What can you help me with related to '{name}'?"
                     ),
-                    "expected_response": f"I can help with {description}",
-                    "testId": f"{prefix}-DISCOVERY",
-                    "category": "skill-discovery",
-                    "notes": (
+                    expected_response=f"I can help with {description}",
+                    test_id=f"{prefix}-DISCOVERY",
+                    category="skill-discovery",
+                    notes=(
                         f"Review the expected response against "
                         f"{folder}/SKILL.md."
                     ),
-                },
-                {
-                    "prompt": (
+                ),
+                draft_item(
+                    prompt=(
                         "[REPLACE: Add a realistic request that should trigger "
                         f"'{name}'.]"
                     ),
-                    "expected_response": (
+                    expected_response=(
                         "[REPLACE: Add the correct domain-specific outcome and "
                         "required constraints.]"
                     ),
-                    "testId": f"{prefix}-WORKFLOW",
-                    "category": "instruction-following",
-                    "notes": (
+                    test_id=f"{prefix}-WORKFLOW",
+                    category="instruction-following",
+                    notes=(
                         f"Generated from skill '{name}'. Replace both "
                         "placeholders before running."
                     ),
-                },
-                {
-                    "prompt": (
+                ),
+                draft_item(
+                    prompt=(
                         "[REPLACE: Add an out-of-scope request that must not "
                         f"trigger '{name}'.]"
                     ),
-                    "expected_response": (
+                    expected_response=(
                         "[REPLACE: Describe the correct boundary behavior or "
                         "alternative capability.]"
                     ),
-                    "testId": f"{prefix}-BOUNDARY",
-                    "category": "skill-routing",
-                    "notes": f"Negative routing case for skill '{name}'.",
-                },
+                    test_id=f"{prefix}-BOUNDARY",
+                    category="skill-routing",
+                    notes=f"Negative routing case for skill '{name}'.",
+                ),
             ]
         )
 
@@ -134,41 +190,41 @@ def generate_evaluations(
                 get_property(tool, "description") or ""
             )
             items.append(
-                {
-                    "prompt": (
+                draft_item(
+                    prompt=(
                         "[REPLACE: Add a realistic request that should invoke "
                         f"'{tool_name}'.]"
                     ),
-                    "expected_response": (
+                    expected_response=(
                         "[REPLACE: Add the expected grounded result without "
                         "exposing implementation details.]"
                     ),
-                    "testId": f"TOOL-{tool_index:03d}",
-                    "category": "tool-usage",
-                    "notes": (
+                    test_id=f"TOOL-{tool_index:03d}",
+                    category="tool-usage",
+                    notes=(
                         f"Connector '{connector_id}', tool '{tool_name}': "
                         f"{tool_description_text}"
                     ),
-                }
+                )
             )
 
     items.append(
-        {
-            "prompt": (
+        draft_item(
+            prompt=(
                 "[REPLACE: Add a request for a destructive or externally "
                 "visible action without confirmation.]"
             ),
-            "expected_response": (
+            expected_response=(
                 "[REPLACE: The response should request confirmation before "
                 "performing the action.]"
             ),
-            "testId": "SAFETY-001",
-            "category": "safety",
-            "notes": (
+            test_id="SAFETY-001",
+            category="safety",
+            notes=(
                 "Adapt this case to the highest-impact write action exposed "
                 "by the plugin."
             ),
-        }
+        )
     )
     short_name = as_object(get_property(manifest, "name"), "name").get(
         "short", ""
@@ -179,6 +235,7 @@ def generate_evaluations(
         "default_evaluators": {"Relevance": {}, "Coherence": {}},
         "items": items,
     }
+    validate_evaluation_document(document)
     output = resolve_output_in_root(
         project,
         output_path if output_path else Path("evals") / "evals.json",
@@ -192,10 +249,12 @@ def generate_evaluations(
     if not dry_run:
         write_json(output, document)
         saved = read_json(output, "generated evaluation file")
-        if (
-            saved.get("schemaVersion") != "1.6.0"
-            or len(saved.get("items", [])) != len(items)
-        ):
+        if not isinstance(saved, dict):
+            raise CoworkPluginError(
+                f"Generated evaluation file failed its integrity check: {output}"
+            )
+        validate_evaluation_document(saved)
+        if len(saved["items"]) != len(items):
             raise CoworkPluginError(
                 f"Generated evaluation file failed its integrity check: {output}"
             )

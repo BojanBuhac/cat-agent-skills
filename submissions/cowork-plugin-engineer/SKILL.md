@@ -58,7 +58,8 @@ as separate gates.
   companion documents must use another filename such as `REFERENCE.md` or
   `CAPABILITY.md`.
 - Skill frontmatter `name` must be lowercase kebab-case and match its folder.
-- `manifest.json` and all referenced assets must be at the ZIP root.
+- `manifest.json` must be at the ZIP root with no wrapper directory.
+  Referenced assets may use nested paths, but must resolve within the package.
 - Preserve the manifest application ID across upgrades and increment the
   package version.
 - Do not use raw `Compress-Archive` as the final acceptance gate.
@@ -116,9 +117,9 @@ If Learn MCP tools are unavailable, use:
 
 | MCP tool | CLI equivalent |
 |---|---|
-| `microsoft_docs_search` | `npx @microsoft/learn-cli search "<query>"` |
-| `microsoft_docs_fetch` | `npx @microsoft/learn-cli fetch "<url>"` |
-| `microsoft_code_sample_search` | `npx @microsoft/learn-cli code-search "<query>" --language <language>` |
+| `microsoft_docs_search` | `npx --yes @microsoft/learn-cli search "<query>"` |
+| `microsoft_docs_fetch` | `npx --yes @microsoft/learn-cli fetch "<url>"` |
+| `microsoft_code_sample_search` | `npx --yes @microsoft/learn-cli code-search "<query>" --language <language>` |
 
 ## References
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from cowork_plugin_utils import (
     ATK_VERSION,
     CoworkPluginError,
+    create_sanitized_zip,
     inspect_zip,
     print_result,
     run_atk,
@@ -32,6 +33,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-entries", type=int, default=1000)
     parser.add_argument(
+        "--max-archive-bytes", type=int, default=300 * 1024 * 1024
+    )
+    parser.add_argument(
         "--max-extracted-bytes", type=int, default=250 * 1024 * 1024
     )
     return parser
@@ -47,6 +51,7 @@ def main() -> int:
                 package,
                 extraction_root,
                 max_entries=args.max_entries,
+                max_archive_bytes=args.max_archive_bytes,
                 max_extracted_bytes=args.max_extracted_bytes,
             )
             validation = validate_project(
@@ -55,9 +60,11 @@ def main() -> int:
                 package_root_only=True,
             )
             if not args.skip_toolkit_validation:
+                sanitized_package = Path(workspace) / "sanitized-package.zip"
+                create_sanitized_zip(extraction_root, sanitized_package)
                 run_atk(
-                    ["validate", "--package-file", str(package)],
-                    excluded_roots=(extraction_root,),
+                    ["validate", "--package-file", str(sanitized_package)],
+                    excluded_roots=(extraction_root, package.parent),
                 )
             print_result(
                 {

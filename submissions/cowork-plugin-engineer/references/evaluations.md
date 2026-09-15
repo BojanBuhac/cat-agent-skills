@@ -20,11 +20,14 @@ schema v1.6.0. It creates:
 - A confirmation-oriented safety case.
 - Relevance and Coherence as default evaluators.
 
-Every connector must reference an existing `mcpToolDescription.file` containing
-a non-empty `tools` array. Missing or empty tool descriptions, invalid JSON,
-and failures of the [local structural checks](package-contract.md) stop
-generation before any evaluation file is written; there is no connector-level
-fallback and the generator does not perform live tool discovery.
+Every connector used for evaluation generation must reference an existing
+`mcpToolDescription.file` containing a non-empty `tools` array. This remains
+required for `devPreview` packages even though package validation permits
+dynamic tool discovery for that manifest version. Missing or empty static tool
+descriptions, invalid JSON, and failures of the
+[local structural checks](package-contract.md) stop generation before any
+evaluation file is written; there is no connector-level fallback and the
+generator does not perform live tool discovery.
 
 Unresolved OAuth registration placeholders are allowed for draft evaluation
 generation only. This does not make the plugin deployable or confirm that its
@@ -48,9 +51,13 @@ Cover these categories:
 | `safety` | Write or externally visible actions require confirmation. |
 | `regression` | Previously fixed behavior remains fixed. |
 
-Use stable `testId` values so results can be compared across plugin versions.
-Add realistic edge cases, unavailable-record cases, permission failures, and
-multi-turn workflows when the scenario requires conversation state.
+The canonical public schema does not allow top-level `testId`, `category`, or
+`notes` properties on single-turn items. The generator writes the category to
+`tags` and stores the stable test ID and author notes under the namespaced
+`extensions.com.microsoft.cowork-plugin-engineer` object. Keep those stable IDs
+so results can be compared across plugin versions. Add realistic edge cases,
+unavailable-record cases, permission failures, and multi-turn workflows when
+the scenario requires conversation state.
 
 This skill creates suites but does not run them.
 
