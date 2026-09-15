@@ -74,4 +74,6 @@ explicit `status`:
   source page path, asset output path, pixel box, and reason. No crop file is written for that
   record.
 
-Duplicate detection examines only `created` records.
+Duplicate detection examines only `created` records and records the SHA-256 of the crop-results
+input. Packaging includes duplicate suggestions only when that checksum still matches the current
+`diagnostics/crop-results.json`.

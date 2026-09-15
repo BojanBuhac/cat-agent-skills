@@ -743,7 +743,8 @@ def hamming_distance(first: str, second: str) -> int:
 
 def command_duplicates(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir).resolve()
-    crop_results = load_json(Path(args.crop_results).resolve())
+    crop_results_path = Path(args.crop_results).resolve()
+    crop_results = load_json(crop_results_path)
     require(isinstance(crop_results, dict) and crop_results.get("schemaVersion") == CROP_RESULT_VERSION,
             f"Crop result schemaVersion must be {CROP_RESULT_VERSION}")
     records = crop_results.get("crops")
@@ -823,6 +824,7 @@ def command_duplicates(args: argparse.Namespace) -> None:
         })
     result = {
         "schemaVersion": DUPLICATE_RESULT_VERSION,
+        "cropResultsSha256": file_sha256(crop_results_path),
         "threshold": args.threshold,
         "suggestions": suggestions,
         "note": "Near-duplicate suggestions are candidates and require semantic review before merging assets."
@@ -910,7 +912,16 @@ def command_package(args: argparse.Namespace) -> None:
     included_paths = required_files | manifest_artifact_paths(manifest)
     duplicate_suggestions = output_dir / "diagnostics" / "duplicate-suggestions.json"
     if duplicate_suggestions.is_file() and not duplicate_suggestions.is_symlink():
-        included_paths.add("diagnostics/duplicate-suggestions.json")
+        duplicate_data = load_json(duplicate_suggestions)
+        require(isinstance(duplicate_data, dict),
+                "diagnostics/duplicate-suggestions.json must be an object")
+        require(duplicate_data.get("schemaVersion") == DUPLICATE_RESULT_VERSION,
+                f"Duplicate result schemaVersion must be {DUPLICATE_RESULT_VERSION}")
+        crop_results_path = output_dir / "diagnostics" / "crop-results.json"
+        if duplicate_data.get("cropResultsSha256") == file_sha256(crop_results_path):
+            included_paths.add("diagnostics/duplicate-suggestions.json")
+        else:
+            print("Omitting stale diagnostics/duplicate-suggestions.json")
     archive_files = [require_archive_file(output_dir, path) for path in sorted(included_paths)]
     archive.parent.mkdir(parents=True, exist_ok=True)
     if archive.exists():
@@ -1152,11 +1163,23 @@ def command_self_test(_: argparse.Namespace) -> None:
                 "assets/test-document/asset-0001.png",
                 "diagnostics/region-proposals.json",
                 "diagnostics/crop-results.json",
-                "diagnostics/validation-report.json"
+                "diagnostics/validation-report.json",
+                "diagnostics/duplicate-suggestions.json"
             }
             require(required.issubset(bundle.namelist()), "Self-test archive is incomplete")
             require("assets/test-document/stale.png" not in bundle.namelist(),
                     "Self-test archive included an unreferenced stale file")
+        write_json(crop_results_path, {
+            "schemaVersion": CROP_RESULT_VERSION,
+            "crops": []
+        })
+        stale_archive = temporary_path / "stale-suggestions.zip"
+        command_package(argparse.Namespace(
+            output_dir=str(root), manifest=str(manifest_path), archive=str(stale_archive)
+        ))
+        with zipfile.ZipFile(stale_archive) as bundle:
+            require("diagnostics/duplicate-suggestions.json" not in bundle.namelist(),
+                    "Self-test archive included stale duplicate suggestions")
 
         try:
             from PIL import Image
