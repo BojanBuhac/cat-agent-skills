@@ -118,19 +118,20 @@ limited to the two profiles that support it.
 Also supply `id: "entry"`, `label: "Value"`, and
 `placeholder: "Paste your API token"`. Expect `PRIVACY.SECRET_INPUT`, even though
 the ID and label are neutral. Repeat with a secret prompt in an error message
-or toggle title. Benign prompts such as "Enter access token status", "API key
-label", "Tokenizer", and "Secretary" must not trigger that diagnostic.
+or toggle title. Lexical words "Tokenizer" and "Secretary" remain allowed;
+metadata prompts such as "Enter access token status" and "API key label" must
+be flagged under the strict input policy.
 
 Repeat with `secretToken`, `secret_token`, and "Paste your secret token".
 Expect rejection through contiguous secret-token matching in input text,
 including ordinary prompts "Enter API token to continue", "Password confirmation",
 and "secret token input". Keep exact normalized action-data key scanning.
-Confirm `tokenCount`, `keywords`,
-`passwordPolicyUrl`, `secretSantaName`, `accessLevel`, and `keyFindings` remain
-allowed through documented benign phrases or intact lexical tokens, not a
-context-word stripping list. `secretTokenStatus` is an explicit status-only
-exception; a placeholder asking for the token must still fail. "Token count
-and password" must fail even though it contains a benign phrase.
+Confirm `keywords`, `secretSantaName`, `accessLevel`, and `keyFindings` remain
+allowed through the sole non-credential phrase exception or intact lexical
+tokens. `tokenCount`, `passwordPolicyUrl`, `secretTokenStatus`, `apiKeyLabel`,
+and `privateKeyLabel` must all fail, without arbitrary metadata exemptions.
+"Secret Santa name and password" must fail even though it contains the exempt
+phrase. `secretQuestion` and `secretQuestionAnswer` must both fail.
 
 ### 12. Destructive action
 

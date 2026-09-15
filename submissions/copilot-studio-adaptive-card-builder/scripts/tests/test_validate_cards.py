@@ -645,8 +645,8 @@ class CardLinterTests(unittest.TestCase):
         card["body"].append(
             {
                 "type": "Input.Text",
-                "id": "secretTokenStatus",
-                "label": "Secret token status",
+                "id": "secretSantaName",
+                "label": "Secret Santa name",
                 "placeholder": "Paste your secret token to check its status",
             }
         )
@@ -690,21 +690,25 @@ class CardLinterTests(unittest.TestCase):
         card["actions"] = [action]
         self.assertTrue(self.lint(card).ok)
 
-    def test_benign_compound_names_and_prompts_are_not_rejected(self):
+    def test_compound_names_follow_strict_input_policy(self):
         names = (
-            ("tokenCount", "Token count"),
-            ("keywords", "Keywords"),
-            ("passwordPolicyUrl", "Password policy URL"),
-            ("secretSantaName", "Secret Santa name"),
-            ("accessLevel", "Access level"),
-            ("keyFindings", "Key findings"),
-            ("secretTokenStatus", "Secret token status"),
-            ("secretTokenLabel", "Secret token label"),
-            ("secretTokenizer", "Secret tokenizer"),
-            ("secretaryTokenCount", "Secretary token count"),
+            ("tokenCount", "Token count", True),
+            ("keyword", "Keyword", False),
+            ("keywords", "Keywords", False),
+            ("passwordPolicyUrl", "Password policy URL", True),
+            ("secretSantaName", "Secret Santa name", False),
+            ("accessLevel", "Access level", False),
+            ("keyFindings", "Key findings", False),
+            ("secretTokenStatus", "Secret token status", True),
+            ("secretTokenLabel", "Secret token label", True),
+            ("secretTokenizer", "Secret tokenizer", True),
+            ("secretaryTokenCount", "Secretary token count", True),
+            ("privateKeyLabel", "Private key label", True),
+            ("passwordHelp", "Password help", True),
+            ("tokenUsage", "Token usage", True),
         )
         for surface in ("id", "label", "placeholder", "errorMessage", "title", "data"):
-            for input_id, prompt in names:
+            for input_id, prompt, sensitive in names:
                 with self.subTest(surface=surface, input_id=input_id):
                     card = base_card()
                     action = submit_action()
@@ -720,18 +724,20 @@ class CardLinterTests(unittest.TestCase):
                         card["body"].append(field)
                     card["actions"] = [action]
                     result = self.lint(card)
-                    self.assertTrue(result.passes(warnings_as_errors=True), result.errors)
+                    expected = {"PRIVACY.SECRET_INPUT"} if sensitive and surface != "data" else set()
+                    self.assertEqual(self.codes(result), expected)
+                    self.assertFalse(result.warnings)
 
-    def test_innocuous_input_names_are_not_rejected(self):
-        for input_id, label in (
-            ("tokenizer", "Tokenizer"),
-            ("secretary", "Secretary"),
-            ("credentialType", "Credential type"),
-            ("accessTokenStatus", "Access token status"),
-            ("apiKeyLabel", "API key label"),
-            ("passwordPolicy", "Password policy"),
-            ("signingKeyStatus", "Signing key status"),
-            ("connectionStringFormat", "Connection string format"),
+    def test_input_names_distinguish_lexical_words_from_secret_metadata(self):
+        for input_id, label, sensitive in (
+            ("tokenizer", "Tokenizer", False),
+            ("secretary", "Secretary", False),
+            ("credentialType", "Credential type", True),
+            ("accessTokenStatus", "Access token status", True),
+            ("apiKeyLabel", "API key label", True),
+            ("passwordPolicy", "Password policy", True),
+            ("signingKeyStatus", "Signing key status", True),
+            ("connectionStringFormat", "Connection string format", True),
         ):
             with self.subTest(input_id=input_id, label=label):
                 card = base_card()
@@ -744,7 +750,9 @@ class CardLinterTests(unittest.TestCase):
                 )
                 card["actions"] = [submit_action()]
                 result = self.lint(card)
-                self.assertNotIn("PRIVACY.SECRET_INPUT", self.codes(result))
+                self.assertEqual(
+                    self.codes(result), {"PRIVACY.SECRET_INPUT"} if sensitive else set()
+                )
 
     def test_secret_input_visible_prompts_are_rejected(self):
         for property_name in ("label", "placeholder", "errorMessage", "title"):
@@ -772,16 +780,16 @@ class CardLinterTests(unittest.TestCase):
                     self.assertEqual(len(matches), 1)
                     self.assertEqual(matches[0].path, "$.body[1]")
 
-    def test_innocuous_input_visible_prompts_are_not_rejected(self):
+    def test_visible_prompts_do_not_receive_metadata_exemptions(self):
         for property_name in ("label", "placeholder", "errorMessage", "title"):
-            for prompt in (
-                "Tokenizer",
-                "Secretary",
-                "Enter credential type",
-                "Enter access token status",
-                "Provide API key label",
-                "Paste your password policy",
-                "Connection string format",
+            for prompt, sensitive in (
+                ("Tokenizer", False),
+                ("Secretary", False),
+                ("Enter credential type", True),
+                ("Enter access token status", True),
+                ("Provide API key label", True),
+                ("Paste your password policy", True),
+                ("Connection string format", True),
             ):
                 with self.subTest(property=property_name, prompt=prompt):
                     card = base_card()
@@ -794,7 +802,9 @@ class CardLinterTests(unittest.TestCase):
                     card["body"].append(field)
                     card["actions"] = [submit_action()]
                     result = self.lint(card)
-                    self.assertTrue(result.ok, result.errors)
+                    self.assertEqual(
+                        self.codes(result), {"PRIVACY.SECRET_INPUT"} if sensitive else set()
+                    )
 
     def test_non_string_placeholder_reports_type_error_without_crashing(self):
         for placeholder in (42, True, [], {}):

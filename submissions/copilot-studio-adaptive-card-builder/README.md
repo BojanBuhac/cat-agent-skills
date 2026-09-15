@@ -120,7 +120,7 @@ For accessibility, Microsoft recommends input `label` properties, `isRequired` a
 * Before branching, match the exact expected `cardId` and `actionSubmitId` for the currently awaited card/version from trusted conversation state. `actionId` alone cannot distinguish stale or cross-card submissions.
 * Keep input IDs distinct from every top-level `data` key on submit actions that collect inputs. Submitted input values can overwrite action metadata with the same key.
 * Secret-collection checks inspect input IDs, labels, placeholders, error messages, and toggle titles, not only the field name.
-* Secret phrases are detected anywhere in input text, with only explicit benign-phrase exceptions. The bundled `references/host-profiles-and-contracts.md` lists every exception, intentional conservative flags, and how to request an exception.
+* Secret phrases are detected anywhere in input text, including metadata labels such as `apiKeyLabel` and `privateKeyLabel`; there are no metadata-suffix exemptions. The bundled `references/host-profiles-and-contracts.md` documents the strict rule, its sole non-credential phrase exception, and how to request a reviewed change.
 * The approval template keeps its review comment optional so Approve is not blocked. Downstream topic logic must require a nonblank trimmed comment for Reject or Request changes, and reprompt without recording the decision when it is blank.
 * External images are excluded from the bundled profile by default.
 * Never use card data as a place to hide credentials or authorization decisions.

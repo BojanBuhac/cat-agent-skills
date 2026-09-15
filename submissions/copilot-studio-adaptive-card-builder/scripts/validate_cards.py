@@ -133,17 +133,7 @@ NORMALIZED_SECRET_FIELD_TERMS = {
     normalize_sensitive_name(term) for term in SECRET_FIELD_TERMS
 }
 BENIGN_INPUT_PHRASES = {
-    "token count",
-    "password policy",
     "secret santa name",
-    "secret tokenizer",
-    "credential type",
-    "access token status",
-    "api key label",
-    "signing key status",
-    "connection string format",
-    "secret token status",
-    "secret token label",
 }
 
 

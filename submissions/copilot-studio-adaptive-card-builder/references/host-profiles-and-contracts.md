@@ -254,34 +254,31 @@ This is token matching, not arbitrary substring matching: `keyword`, `keywords`,
 `tokenizer`, and `secretary` stay whole words. Bare `key` and `access` are not
 secret terms, so `keyFindings` and `accessLevel` need no exception.
 
-These are the complete input-only benign-phrase exceptions:
+**Rule: flag every secret term in an input ID or prompt, even when it describes
+metadata; only the non-credential phrase `secret santa name` is exempt.**
 
-| Exact phrase | Permitted meaning |
-|---|---|
-| `token count` | A numeric count, including `tokenCount` and `secretaryTokenCount`, not token contents |
-| `password policy` | Policy text or its URL, including `passwordPolicyUrl`, not a password |
-| `secret santa name` | A gift-exchange participant name, not authentication data |
-| `secret tokenizer` | A tokenizer name or type, not a token value |
-| `credential type` | A credential category, not the credential itself |
-| `access token status` | A status such as configured/expired, not an access token |
-| `api key label` | A display label, not an API key |
-| `signing key status` | A key status, not signing material |
-| `connection string format` | A format description, not a live connection string |
-| `secret token status` | A status such as configured/expired; `secretTokenStatus` is intentionally allowed |
-| `secret token label` | A display label; `secretTokenLabel` is intentionally allowed |
+There are no metadata-suffix exemptions: `secretTokenLabel` and
+`privateKeyLabel` both fail; `accessTokenStatus` and `tokenUsage` both fail;
+`passwordPolicy`, `passwordHelp`, `passwordPolicyUrl`, and `signingKeyStatus`
+all fail. `secretTokenStatus`, `tokenCount`, `credentialType`, and
+`connectionStringFormat` also fail. These are intentional conservative flags,
+not assertions that every such field contains a credential. Prefer an approved
+authentication/configuration surface for credential-related information; for
+genuinely non-secret metadata, describe the actual non-secret value without a
+secret term. Never rename a credential input merely to obtain PASS.
 
-The exceptions use the same token boundaries and cover only occurrences fully
-inside the matched benign phrase. They never exempt a whole input or prompt.
-"Token count and password" and a `secretTokenStatus` input whose placeholder
-asks for an API token still fail. Review actual data meaning even when a field
-name is exempt; naming cannot make a credential safe to collect.
-
-New compounds containing secret terms are flagged by default. `tokenUsage`,
-`passwordHelp`, and `privateKeyLabel` are conservative flags until reviewed.
+`secret santa name` is the sole explicit benign phrase because "Secret Santa"
+names a gift-exchange activity, not authentication material. Its exception
+covers only that phrase's token span, never a whole input or prompt:
+"Secret Santa name and password" still fails. `secretTokenizer` has a separate
+`secret` token and therefore fails, unlike the single word `tokenizer`.
 `secretQuestion` and `secretQuestionAnswer` are intentionally flagged because
-authentication challenge material is not confidently benign.
-To request an exception, provide synthetic field/prompt examples and the
-non-secret output contract to the skill maintainer. Any change must add an
+authentication challenge material is not confidently benign; exempting the
+question phrase would also hide a request for its answer.
+
+To request a policy change, provide synthetic field/prompt examples and the
+non-secret output contract to the skill maintainer. Do not add ad hoc metadata
+exceptions. A new non-credential phrase exception must add an
 explicit entry to `BENIGN_INPUT_PHRASES`, document its meaning here, and include
 both allowed examples and tests that nearby secret requests remain rejected.
 There is no card-supplied bypass or context-word allow-list.
