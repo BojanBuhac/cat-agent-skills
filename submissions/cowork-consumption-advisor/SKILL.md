@@ -81,10 +81,9 @@ Trigger: "/analyze-cowork-consumption" or "build a consumption report from these
   credits-per-task KPI).
 
 ### Step 2: Enrich users with directory data (Microsoft Graph)
-The exports carry UPNs only. Department and manager come from the directory - collect them
-**before** running the script (read-only, `User.Read.All`):
-1. Extract the `User Principal Name` column from the Consumption > Users export (a quick
-   `python -c` over the CSV is fine). Skip this step entirely if the user supplied an Entra
+Directory enrichment is optional and requires a Users export with UPNs; skip it when only Agents and services is available.
+1. If a Users export is present, extract its `User Principal Name` column (a quick
+   `python -c` over the CSV is fine). Skip this step if the user supplied an Entra
    "Download users" CSV or their own org mapping.
 2. Query in batches of **15 UPNs** with the Graph read tool (`graph-QueryGraph`; any tool that
    issues a read-only Microsoft Graph GET works the same way):
