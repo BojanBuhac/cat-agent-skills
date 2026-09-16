@@ -347,6 +347,12 @@ def pct(a, b):
     return round(a / b * 100, 1) if b else None
 
 
+def md_escape(value):
+    s = clean(value).replace("\r", " ").replace("\n", " ")
+    s = html.escape(s, quote=False)
+    return re.sub(r"([\\`*_{}\[\]()#+\-.!|>])", r"\\\1", s)
+
+
 _PSEUDONYM_SECRET = os.urandom(32)  # per-run secret; never written to any output
 
 
@@ -366,11 +372,16 @@ def anonymize_data(data):
     for x in data.get("cowork_usage", []):
         x["displayName"] = pseudonym("User", x["upnKey"])
         x["upn"] = pseudonym("user", x["upnKey"]).replace(" ", "") + "@hidden"
+    seen_org = set()
     for k, o in (data.get("org") or {}).items():
-        mk = (o.get("managerUpn") or o.get("manager") or "")
-        o["manager"] = pseudonym("Manager", mk, 8) if mk else ""
-        o["managerUpn"] = pseudonym("manager", mk, 8).replace(" ", "") + "@hidden" if mk else ""
-        o["upn"] = pseudonym("user", k).replace(" ", "") + "@hidden"
+        if id(o) in seen_org:
+            continue
+        seen_org.add(id(o))
+        manager_key = o.get("managerUpn") or o.get("manager") or ""
+        user_key = o.get("upn") or k
+        o["manager"] = pseudonym("Manager", manager_key, 8) if manager_key else ""
+        o["managerUpn"] = pseudonym("manager", manager_key, 8).replace(" ", "") + "@hidden" if manager_key else ""
+        o["upn"] = pseudonym("user", user_key).replace(" ", "") + "@hidden"
     return data
 
 
@@ -955,9 +966,9 @@ def render_html(res, anonymize=False):
 
 def render_md(res):
     h, f, cur = res["headline"], res["forecast"], res["meta"]["currency"]
-    lines = [f"# {res['meta']['title']}", f"*As of {res['meta']['asOf']} - Microsoft 365 admin center exports*", "",
+    lines = [f"# {md_escape(res['meta']['title'])}", f"*As of {res['meta']['asOf']} - Microsoft 365 admin center exports*", "",
              "## Headline", f"- **Copilot Credits used:** {fmt(h['totalCredits'])}" + (f" ({fmt(h['prepaidShare'],1)}% prepaid)" if h['prepaidShare'] is not None else ""),
-             f"- **Estimated cost:** {money(h['estimatedCost'], cur)} (list {money(h['listCost'], cur)}; {h['costBasis']})",
+             f"- **Estimated cost:** {money(h['estimatedCost'], cur)} (list {money(h['listCost'], cur)}; {md_escape(h['costBasis'])})",
              f"- **Active users:** {fmt(h['activeUsers'])} - {fmt(h['creditsPerActiveUser'])} credits per active user, median {fmt(h['medianCreditsPerUser'])}"]
     if h["creditsPerTask"]:
         lines.append(f"- **Credits per task:** {fmt(h['creditsPerTask'])} over {fmt(h['matchedTasks'])} tasks of users in both exports ({fmt(h['totalTasks'])} Cowork tasks in total, {fmt(h['scheduledTaskShare'],1)}% scheduled)")
@@ -968,22 +979,22 @@ def render_md(res):
     P = res["policies"]
     if P["rows"]:
         lines += ["", "## Spending limits", f"- {P['unlimitedCount']} active policies without a limit carry {fmt(P['unlimitedShare'],1)}% of credits",
-                  f"- Near limit: {', '.join(P['nearLimit']) or 'none'}; idle: {', '.join(P['idle']) or 'none'}"]
+                  f"- Near limit: {md_escape(', '.join(P['nearLimit']) or 'none')}; idle: {md_escape(', '.join(P['idle']) or 'none')}"]
     O = res["org"]
     if O["provided"]:
         lines += ["", f"## Departments ({fmt(O['coverage'],0)}% of users matched)"]
         for d in O["departments"][:8]:
-            lines.append(f"- {d['name']}: {fmt(d['used'])} credits ({d['share']}%), {d['users']} users, {fmt(d['avgPerUser'])} per user, {d['nearOrOver']} near/over limit")
+            lines.append(f"- {md_escape(d['name'])}: {fmt(d['used'])} credits ({d['share']}%), {d['users']} users, {fmt(d['avgPerUser'])} per user, {d['nearOrOver']} near/over limit")
         lines += ["", "## Managers"]
         for m in O["managers"][:8]:
-            lines.append(f"- {m['name']}: {fmt(m['used'])} credits ({m['share']}%), {m['users']} users, {m['nearOrOver']} near/over limit")
+            lines.append(f"- {md_escape(m['name'])}: {fmt(m['used'])} credits ({m['share']}%), {m['users']} users, {m['nearOrOver']} near/over limit")
     U = res["users"]
     lines += ["", "## Users", f"- Top 10 users = {fmt(U['top10Share'],1)}% of credits; {len(U['overLimit'])} over limit, {len(U['nearLimit'])} near limit, {len(U['dormant'])} dormant"]
     lines += ["", "## Recommendations"]
     for r in res["recommendations"]:
-        lines.append(f"- **[{r['priority']}] {r['title']}** - {r['evidence']} -> {r['action']}")
+        lines.append(f"- **[{md_escape(r['priority'])}] {md_escape(r['title'])}** - {md_escape(r['evidence'])} -> {md_escape(r['action'])}")
     if res["dataQuality"]:
-        lines += ["", "## Data quality"] + [f"- {n}" for n in res["dataQuality"]]
+        lines += ["", "## Data quality"] + [f"- {md_escape(n)}" for n in res["dataQuality"]]
     return "\n".join(lines) + "\n"
 
 
@@ -1070,7 +1081,7 @@ def main(argv=None):
             print("note: no --as-of and no export timestamp in file names - using today's date as the snapshot date", file=sys.stderr)
 
     res = analyze(data, args, as_of)
-    res["meta"]["detected"] = detected
+    res["meta"]["detected"] = [re.sub(r": .* ", ": <redacted> ", item) for item in detected] if args.anonymize else detected
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "consumption-analysis.json"), "w", encoding="utf-8") as fh:
         json.dump(res, fh, indent=2)
