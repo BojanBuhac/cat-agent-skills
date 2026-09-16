@@ -72,11 +72,49 @@ def load_json(path: Path) -> Any:
         raise ValidationError(f"Cannot read valid JSON from {path}: {exc}") from exc
 
 
+def require_no_symlink_components(path: Path, field: str) -> None:
+    absolute_path = path.absolute()
+    for component in (absolute_path, *absolute_path.parents):
+        require(not component.is_symlink(), f"{field} cannot traverse a symlink: {component}")
+
+
 def write_json(path: Path, value: Any) -> None:
+    require_no_symlink_components(path, str(path))
     path.parent.mkdir(parents=True, exist_ok=True)
+    require_no_symlink_components(path, str(path))
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(value, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
+
+
+def safe_unlink(path: Path, field: str) -> None:
+    require_no_symlink_components(path, field)
+    require(path.is_file(), f"{field} must be a regular file")
+    path.unlink()
+
+
+def clear_current_run_metadata(output_dir: Path) -> None:
+    stale_paths = (
+        output_dir / "summary.md",
+        output_dir / "diagnostics" / "region-proposals.json",
+        output_dir / "diagnostics" / "crop-results.json",
+        output_dir / "diagnostics" / "duplicate-suggestions.json",
+        output_dir / "diagnostics" / "validation-report.json",
+    )
+    for stale_path in stale_paths:
+        require_no_symlink_components(stale_path, str(stale_path))
+        if stale_path.exists():
+            safe_unlink(stale_path, str(stale_path))
+
+
+def prepare_page_directory(output_dir: Path, document_id: str) -> Path:
+    pages_dir = output_dir / "pages" / document_id
+    require_no_symlink_components(pages_dir, str(pages_dir))
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    require_no_symlink_components(pages_dir, str(pages_dir))
+    for old_page in pages_dir.glob("page-*.png"):
+        safe_unlink(old_page, str(old_page))
+    return pages_dir
 
 
 def safe_relative_path(value: Any, field: str) -> PurePosixPath:
@@ -345,10 +383,15 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
         requested_pages[document_id].update(range(start, end + 1))
     if request["pageRanges"]:
         for document_id, selected_pages in requested_pages.items():
-            missing_pages = selected_pages - document_page_numbers[document_id]
-            require(not missing_pages,
-                    f"Document {document_id} is missing requested page records: "
-                    + ", ".join(str(number) for number in sorted(missing_pages)))
+            require(bool(selected_pages),
+                    f"Document {document_id} must have a selected page range")
+            actual_pages = document_page_numbers[document_id]
+            missing_pages = selected_pages - actual_pages
+            extra_pages = actual_pages - selected_pages
+            require(not missing_pages and not extra_pages,
+                    f"Document {document_id} page records must exactly match its requested pages; "
+                    f"missing: {', '.join(str(number) for number in sorted(missing_pages)) or 'none'}; "
+                    f"extra: {', '.join(str(number) for number in sorted(extra_pages)) or 'none'}")
     else:
         for document_id, declared_page_count in document_page_counts.items():
             expected_pages = set(range(1, declared_page_count + 1))
@@ -647,10 +690,8 @@ def command_render(args: argparse.Namespace) -> None:
             "Input must be an existing PDF")
     document_id = require_id(args.document_id, "document-id")
     output_dir = Path(args.output_dir).resolve()
-    pages_dir = output_dir / "pages" / document_id
-    pages_dir.mkdir(parents=True, exist_ok=True)
-    for old_page in pages_dir.glob("page-*.png"):
-        old_page.unlink()
+    clear_current_run_metadata(output_dir)
+    pages_dir = prepare_page_directory(output_dir, document_id)
     try:
         document = pdfium.PdfDocument(str(input_path))
     except Exception as exc:
@@ -673,6 +714,7 @@ def command_render(args: argparse.Namespace) -> None:
         bitmap = page.render(scale=scale)
         image = bitmap.to_pil()
         destination = pages_dir / f"page-{page_index + 1:04d}.png"
+        require_no_symlink_components(destination, str(destination))
         image.save(destination, format="PNG", optimize=True)
         rendered_pages.append({
             "pageNumber": page_index + 1,
@@ -1145,6 +1187,25 @@ def command_self_test(_: argparse.Namespace) -> None:
             )
         )
         expect_manifest_error(
+            "extra page outside requested range",
+            lambda value: (
+                value["documents"][0].update({
+                    "pageCount": 2,
+                    "pages": value["documents"][0]["pages"] + [{
+                        "pageNumber": 2,
+                        "image": "pages/test-document/page-0002.png",
+                        "width": None,
+                        "height": None,
+                        "status": "verified",
+                        "reviewReasons": []
+                    }]
+                }),
+                value["request"].update({"pageRanges": [
+                    {"documentId": "test-document", "from": 1, "to": 1}
+                ]})
+            )
+        )
+        expect_manifest_error(
             "boolean occurrence page number",
             lambda value: value["assets"][0]["occurrences"][0].update({"pageNumber": True})
         )
@@ -1185,6 +1246,54 @@ def command_self_test(_: argparse.Namespace) -> None:
                 pass
             else:
                 raise ValidationError(f"Self-test accepted invalid render page range: {invalid_range}")
+
+        cleanup_root = temporary_path / "cleanup-output"
+        cleanup_files = (
+            cleanup_root / "summary.md",
+            cleanup_root / "diagnostics" / "region-proposals.json",
+            cleanup_root / "diagnostics" / "crop-results.json",
+            cleanup_root / "diagnostics" / "duplicate-suggestions.json",
+            cleanup_root / "diagnostics" / "validation-report.json",
+        )
+        for cleanup_file in cleanup_files:
+            cleanup_file.parent.mkdir(parents=True, exist_ok=True)
+            cleanup_file.write_text("stale", encoding="utf-8")
+        clear_current_run_metadata(cleanup_root)
+        require(not any(path.exists() for path in cleanup_files),
+                "Self-test did not clear stale current-run metadata")
+
+        write_target = temporary_path / "write-target.json"
+        write_target.write_text("unchanged", encoding="utf-8")
+        write_link = temporary_path / "write-link.json"
+        try:
+            write_link.symlink_to(write_target)
+        except OSError:
+            pass
+        else:
+            expect_validation_error(
+                lambda: write_json(write_link, {"unsafe": True}),
+                "JSON destination symlink"
+            )
+            require(write_target.read_text(encoding="utf-8") == "unchanged",
+                    "Self-test JSON symlink target was overwritten")
+
+        page_target = temporary_path / "page-target"
+        page_target.mkdir()
+        outside_page = page_target / "page-0001.png"
+        outside_page.write_bytes(PNG_SIGNATURE + b"outside")
+        linked_pages_root = temporary_path / "linked-pages-output"
+        (linked_pages_root / "pages").mkdir(parents=True)
+        linked_page_dir = linked_pages_root / "pages" / "test-document"
+        try:
+            linked_page_dir.symlink_to(page_target, target_is_directory=True)
+        except OSError:
+            pass
+        else:
+            expect_validation_error(
+                lambda: prepare_page_directory(linked_pages_root, "test-document"),
+                "render page-directory symlink"
+            )
+            require(outside_page.is_file(), "Self-test render cleanup deleted an external page")
         expect_manifest_error(
             "non-canonical manifest page image",
             lambda value: value["documents"][0]["pages"][0].update(

@@ -43,7 +43,7 @@ Use [the extraction profiles](./references/extraction-profiles.md) when the user
 
 ## Required Output
 
-Produce `<source-name>-semantic-images.zip` for one document or `pdf-image-extraction-<date>.zip` for multiple documents:
+Produce `<document-id>-semantic-images.zip` for one document or `pdf-image-extraction-<date>.zip` for multiple documents. Build single-document archive names only from the validated lowercase document ID, never from an uploaded source filename:
 
 ```text
 manifest.json
@@ -70,7 +70,8 @@ diagnostics/
 - Reject password-protected files that cannot be opened. Never request passwords or secrets in chat.
 - Assign each source a stable lowercase document ID.
 - Record source filename, SHA-256 when available, page count, title, detected languages, and requested page range.
-- Create a clean `semantic-image-output` working directory.
+- Create a clean `semantic-image-output` working directory. The render helper removes stale
+  `summary.md` and current-run diagnostic JSON files before rendering.
 
 ### 2. Render Pages
 
