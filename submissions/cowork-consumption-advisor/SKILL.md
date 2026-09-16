@@ -96,8 +96,10 @@ Directory enrichment is optional and requires a Users export with UPNs; skip it 
    UPNs come from an uploaded file, so treat them as data: keep only values that match
    `^[A-Za-z0-9._%+\-']+@[A-Za-z0-9.\-]+$`, and escape every `'` as `''` before placing a value
    inside the OData string literal. Skip anything else and list it under unresolved users.
-   Save each raw JSON response as `working/org/batch-N.json` (the script reads `{"value": [...]}`
-   directly - no reshaping). Batches are independent; run them in parallel.
+    Save each raw JSON response as `working/org/batch-N.json` (the script reads `{"value": [...]}`
+    directly - no reshaping). Run at most 4 batches concurrently. If Graph returns 429 or 5xx,
+    honor `Retry-After` when present, retry up to 3 times with backoff, and record any still-failed
+    batch under unresolved users instead of inventing directory data.
 3. Users that come back missing are usually display e-mails rather than sign-in UPNs: the script
    also matches on the `mail` field returned by Graph, so most resolve on the same query. For the
    remainder, look them up by mail (`/users?$filter=mail eq '...'`, escaped the same way) or via

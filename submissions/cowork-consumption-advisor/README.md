@@ -37,7 +37,7 @@ Output: a self-contained `consumption-report.html` (no CDN, printable, safe to e
 Exports from **Microsoft 365 admin center > Copilot** (CSV, any file name - detected by columns):
 
 1. Cowork > Usage > **Cowork usage details**
-2. Cost Management > Consumption > **Policies** (Configuration export)
+2. Cost Management > **Configuration** > Export (**Policies**)
 3. Cost Management > Consumption > **Users**
 4. Cost Management > Consumption > **Groups**
 5. Cost Management > Consumption > **Agents and services**
