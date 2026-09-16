@@ -830,12 +830,15 @@ def donut(parts, size=120):
     total = sum(v for _, v, _ in parts) or 1
     r, cx, cy = 42, size / 2, size / 2
     circ = 2 * 3.14159 * r
-    off, segs = 0, []
+    off = 0
+    segs = [f'<circle r="{r}" cx="{cx}" cy="{cy}" fill="transparent" stroke="#e5e7eb" stroke-width="16"></circle>']
     for name, v, col in parts:
         d = v / total * circ
         segs.append(f'<circle r="{r}" cx="{cx}" cy="{cy}" fill="transparent" stroke="{col}" stroke-width="16" '
                     f'stroke-dasharray="{d:.2f} {circ-d:.2f}" stroke-dashoffset="{-off:.2f}" transform="rotate(-90 {cx} {cy})"><title>{html.escape(name)}: {v:,}</title></circle>')
         off += d
+    center = round(parts[0][1] / total * 100) if parts else 0
+    segs.append(f'<text x="{cx}" y="{cy + 4}" text-anchor="middle" font-size="14" font-weight="700" fill="#111">{center}%</text>')
     return f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}">{"".join(segs)}</svg>'
 
 
@@ -851,18 +854,18 @@ def render_html(res, anonymize=False):
         return u["upn"]
 
     # KPIs
-    fc_label = ("Projected month-end" if f["mode"] == "monthly" else "Monthly run-rate")
-    fc_val = f.get("projectedPeriodTotal") if f["mode"] == "monthly" else f.get("monthlyRunRate")
-    fc_sub = (f"{f['daysElapsed']}/{f['daysInPeriod']} days elapsed" if f["mode"] == "monthly"
-              else f"~{money(f.get('annualisedCost'), cur)}/yr at {res['meta']['paygRateBasis']}")
+    monthly_credits = f.get("projectedPeriodTotal") if f["mode"] == "monthly" else f.get("monthlyRunRate")
+    annual_credits = round(monthly_credits * 12) if f["mode"] == "monthly" and monthly_credits is not None else f.get("annualisedCredits")
+    annual_cost = round(annual_credits * rate, 2) if annual_credits is not None else f.get("annualisedCost")
     kpis = [
         ("Credits used", fmt(h["totalCredits"]), f"{h.get('firstActivity') or f.get('periodStart')} to {h.get('lastActivity') or f.get('periodEnd')}"),
         ("Prepaid share", f"{fmt(h['prepaidShare'],0)}%" if h["prepaidShare"] is not None else "-", f"{fmt(h['prepaidCredits'])} prepaid; {fmt(h['paygCredits'])} pay-as-you-go" if h["prepaidShare"] is not None else "prepaid / PAYG split not provided"),
         ("Est. cost", money(h["estimatedCost"], cur), (f"list {money(h['listCost'], cur)} @ {rate}/credit" if h["splitAvailable"] else f"{res['meta']['paygRateBasis']} @ {rate}/credit - no split")),
-        (fc_label, fmt(fc_val), fc_sub),
         ("Active users", fmt(h["activeUsers"]), f"median {fmt(h['medianCreditsPerUser'])} credits/user" if res["users"]["count"] else h["activeUsersBasis"]),
         ("Credits / active user", fmt(h["creditsPerActiveUser"]), "mean across consuming users"),
-        ("Credits / task", fmt(h["creditsPerTask"]), f"over {fmt(h['matchedTasks'])} matched tasks ({fmt(h['totalTasks'])} total, {fmt(h['scheduledTaskShare'],1)}% scheduled)" if h["totalTasks"] else "Cowork usage export not provided"),
+        ("Credits / Cowork task", fmt(h["creditsPerTask"]), f"{fmt(h['matchedTaskUsers'])} matched users, {fmt(h['matchedTasks'])} tasks" if h["totalTasks"] else "Cowork usage export not provided"),
+        ("Monthly run-rate", fmt(monthly_credits), f"~{money(f.get('projectedCost') if f['mode'] == 'monthly' else f.get('monthlyRunRate', 0) * rate, cur)}/month at {res['meta']['paygRateBasis']}"),
+        ("Annualised run-rate", fmt(annual_credits), f"~{money(annual_cost, cur)}/year at {res['meta']['paygRateBasis']}"),
     ]
     kpi_html = "".join(f'<div class="kpi"><div class="k">{html.escape(str(l))}</div><div class="v">{html.escape(str(v))}</div><div class="s">{html.escape(str(s))}</div></div>' for l, v, s in kpis)
 
@@ -870,19 +873,23 @@ def render_html(res, anonymize=False):
     svc = res["services"]
     if svc:
         svc_rows = "".join(f"<tr><td>{html.escape(s['name'])}</td><td class='num'>{fmt(s['activeUsers'])}</td><td class='num'>{fmt(s['used'])}</td>"
-                           f"<td class='num'>{fmt(s['prepaid'])}</td><td class='num'>{fmt(s['payg'])}</td><td class='num'>{money(s['payg']*rate, cur)}</td><td>{s['lastActivity'] or '-'}</td></tr>" for s in svc)
+                           f"<td class='num'>{fmt(s['prepaid'])}</td><td class='num'>{fmt(s['payg'])}</td><td>{s['lastActivity'] or '-'}</td></tr>" for s in svc)
         known = {"copilot cowork", "cowork", "work iq api", "workiq api"}
         missing = [n for n in ("Copilot Cowork", "Work IQ API") if n.lower() not in {s["name"].lower() for s in svc}]
         if h["splitAvailable"]:
-            parts = [("Prepaid", sum(s["prepaid"] for s in svc), "#0f6cbd"), ("Pay-as-you-go", sum(s["payg"] for s in svc), "#5b5fc7")]
-            split_html = f"""<div class="ring">{donut(parts)}<div class="legend"><span><i style="background:#0f6cbd"></i>Prepaid {fmt(parts[0][1])}</span><span><i style="background:#5b5fc7"></i>Pay-as-you-go {fmt(parts[1][1])}</span>
-        <p class="note">{'No consumption recorded for: ' + html.escape(', '.join(missing)) + '.' if missing else ''} Prepaid credits come from capacity packs; pay-as-you-go includes pre-purchase plan (P3) credits.</p></div></div>"""
+            parts = [("Prepaid", sum(s["prepaid"] for s in svc), "#0f6cbd"), ("Pay-as-you-go", sum(s["payg"] for s in svc), "#f7a600")]
+            split_html = f"""<div class="ring">{donut(parts, 150)}<div class="legend"><span><i style="background:#0f6cbd"></i>Prepaid: {fmt(parts[0][1])}</span><span><i style="background:#f7a600"></i>Pay-as-you-go: {fmt(parts[1][1])}</span>
+        </div></div>"""
         else:
             split_html = "<p class='note'>Prepaid vs pay-as-you-go split unavailable or inconsistent; costs fall back to the configured PAYG rate.</p>"
-        svc_html = f"""{split_html}
-        <div class="tw" style="border:0;margin-top:12px"><table><thead><tr><th onclick="sortTable(this)">Service</th><th class="num" onclick="sortTable(this)">Active users</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Prepaid</th><th class="num" onclick="sortTable(this)">PAYG</th><th class="num" onclick="sortTable(this)">PAYG cost</th><th>Last activity</th></tr></thead><tbody>{svc_rows}</tbody></table></div>"""
+        service_note = f"{'No consumption recorded for: ' + html.escape(', '.join(missing)) + '. ' if missing else ''}Prepaid credits come from capacity packs; pay-as-you-go includes pre-purchase plan (P3) credits."
+        svc_table_html = f"""<div class="tw" style="border:0"><table><thead><tr><th onclick="sortTable(this)">Service</th><th class="num" onclick="sortTable(this)">Active users</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Prepaid</th><th class="num" onclick="sortTable(this)">Pay-as-you-go</th><th>Last activity</th></tr></thead><tbody>{svc_rows}</tbody></table></div><p class="muted">{service_note}</p>"""
     else:
-        svc_html = "<p class='note'>Agents & services export not provided - service split unavailable.</p>"
+        split_html = "<p class='note'>Agents & services export not provided - service split unavailable.</p>"
+        svc_table_html = "<p class='note'>Agents & services export not provided.</p>"
+
+    U = res["users"]
+    tier_rows = "".join(f"<tr><td class='num'>{fmt(t['limit']) if t['limit'] else 'none'}</td><td class='num'>{t['users']}</td><td class='num'>{fmt(t['used'])}</td><td class='num'>{fmt(t['avgUsed'])}</td><td class='num'>{'-' if t['avgPctOfLimit'] is None else fmt(t['avgPctOfLimit'],0)+'%'}</td></tr>" for t in U["limitTiers"])
 
     # Policies
     P = res["policies"]
@@ -893,14 +900,22 @@ def render_html(res, anonymize=False):
             if p["usageRate"] is not None and p["usageRate"] >= near_pct:
                 return "bad"
             return ""
+        def policy_flag(p):
+            if p["unlimited"]:
+                return '<span class="pill warn">Unlimited</span>'
+            if p["usageRate"] is not None and p["usageRate"] >= near_pct:
+                return '<span class="pill bad">Near limit</span>'
+            if p["used"] == 0:
+                return '<span class="pill muted-b">Idle</span>'
+            return '<span class="pill ok">OK</span>'
         prow = "".join(f"<tr><td>{html.escape(p['name'])} {'<span class=pill>tenant-wide</span>' if p.get('tenantWide') else ''}</td><td>{html.escape(p['appliesTo'].replace('Group: ',''))}</td>"
                    f"<td class='num'>{fmt(p['activeUsers'])}</td><td class='num'>{fmt(p['used'])}</td><td class='num' data-v='{p['limit'] or 0}'>{'No limit' if p['unlimited'] else ('Unknown' if p.get('limitMissing') else fmt(p['limit']))}</td>"
-                       f"<td class='num' data-v='{p['usageRate'] or 0}'>{'-' if p['usageRate'] is None else fmt(p['usageRate'],0)+'%'}</td><td>{html.escape(p['billingMethod'].split(' (')[0])}</td><td>{html.escape(p['status'])}</td></tr>" for p in P["rows"])
+                       f"<td class='num' data-v='{p['usageRate'] or 0}'>{'-' if p['usageRate'] is None else fmt(p['usageRate'],0)+'%'}</td><td>{html.escape(p['billingMethod'].split(' (')[0])}</td><td>{html.escape(p['status'])}</td><td>{policy_flag(p)}</td></tr>" for p in P["rows"])
         near_labels = html.escape(', '.join(P['nearLimit']) or 'none')
         idle_labels = html.escape(', '.join(P['idle']) or 'none')
-        pol_html = f"""<p class="note">{P['unlimitedCount']} active policies without a limit carry {fmt(P['unlimitedShare'],1)}% of active policy-attributed credits. Near limit: {near_labels}. Idle: {idle_labels}.</p>
-        {bar_rows(sorted(P['rows'], key=lambda p: -p['used']), 'used', 'name', total=P['total'] or None, color=pcolor)}
-        <div class="tw" style="margin-top:12px"><table><thead><tr><th onclick="sortTable(this)">Policy</th><th onclick="sortTable(this)">Applies to</th><th class="num" onclick="sortTable(this)">Active users</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Limit / month</th><th class="num" onclick="sortTable(this)">Used</th><th onclick="sortTable(this)">Billing</th><th onclick="sortTable(this)">Status</th></tr></thead><tbody>{prow}</tbody></table></div>"""
+        pol_html = f"""<div class="tw"><table><thead><tr><th onclick="sortTable(this)">Policy</th><th onclick="sortTable(this)">Applies to</th><th class="num" onclick="sortTable(this)">Active users</th><th class="num" onclick="sortTable(this)">Credits used</th><th class="num" onclick="sortTable(this)">Limit</th><th class="num" onclick="sortTable(this)">Usage rate</th><th onclick="sortTable(this)">Billing method</th><th onclick="sortTable(this)">Status</th><th onclick="sortTable(this)">Flag</th></tr></thead><tbody>{prow}</tbody></table></div>
+        <p class="muted">{P['unlimitedCount']} active policies without a limit carry {fmt(P['unlimitedShare'],1)}% of active policy-attributed credits. Near limit: {near_labels}. Idle: {idle_labels}. Only a <b>policy-level</b> limit hard-stops usage; per-user limits are soft.</p>
+        <div class="card" style="margin-top:12px"><h4>Per-user limit tiers</h4><div class="tw" style="border:0"><table><thead><tr><th class="num" onclick="sortTable(this)">Monthly limit</th><th class="num" onclick="sortTable(this)">Users</th><th class="num" onclick="sortTable(this)">Credits used</th><th class="num" onclick="sortTable(this)">Avg / user</th><th class="num" onclick="sortTable(this)">Avg % of limit</th></tr></thead><tbody>{tier_rows}</tbody></table></div></div>"""
     else:
         pol_html = "<p class='note'>Spending policies export not provided.</p>"
 
@@ -909,33 +924,45 @@ def render_html(res, anonymize=False):
     if G["rows"]:
         grow = "".join(f"<tr><td>{html.escape(g['name'])}</td><td class='num'>{fmt(g['totalUsers']) if g['totalUsers'] else '-'}</td><td class='num'>{fmt(g['membersUsed'])}</td>"
                        f"<td class='num' data-v='{g['activationRate'] or 0}'>{'-' if g['activationRate'] is None else fmt(g['activationRate'],0)+'%'}</td><td class='num'>{fmt(g['used'])}</td><td class='num'>{fmt(g['avgPerUserPerDay'],0)}</td><td class='num'>{fmt(g['sessions'])}</td><td>{g['lastActivity'] or '-'}</td></tr>" for g in G["rows"])
-        grp_html = f"""<p class="note">Users can belong to several groups, so group totals overlap ({fmt(G['sumOfGroups'])} summed vs {fmt(h['totalCredits'])} actual). Activation = members that used credits / total members.</p>
-        {bar_rows(G['rows'][:8], 'used', 'name')}
-        <div class="tw" style="margin-top:12px"><table><thead><tr><th onclick="sortTable(this)">Group</th><th class="num" onclick="sortTable(this)">Members</th><th class="num" onclick="sortTable(this)">Members used</th><th class="num" onclick="sortTable(this)">Activation</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Avg/user/day</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Last activity</th></tr></thead><tbody>{grow}</tbody></table></div>"""
+        concentration_html = f"""<p>Top 10 users account for <b>{fmt(U['top10Share'],0)}%</b> of user credits; the top 20% of users ({U['top20pctCount']}) account for <b>{fmt(U['top20pctShare'],0)}%</b>.</p>{bar_rows(U['top10'], 'used', 'displayName', total=U['total'] or None, color=lambda u: 'bad' if (u.get('pctUsed') or 0) >= 100 else ('warn' if (u.get('pctUsed') or 0) >= near_pct else ''))}"""
+        grp_html = f"""<div class="grid2"><div class="card"><h4>Credits by group</h4>{bar_rows(G['rows'][:10], 'used', 'name', valfmt=lambda g: f"{fmt(g['used'])} <span class='muted'>{g['membersUsed']} consumers</span>")}</div>
+        <div class="card"><h4>Concentration</h4>{concentration_html}</div></div>
+        <div class="tw" style="margin-top:12px"><table><thead><tr><th onclick="sortTable(this)">Group</th><th class="num" onclick="sortTable(this)">Total users</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Members that used credits</th><th class="num" onclick="sortTable(this)">Avg / user / day</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Last activity</th></tr></thead><tbody>{grow}</tbody></table></div>
+        <p class="muted">Groups overlap - a user in several groups is counted in each. Never add group rows together.</p>"""
     else:
         grp_html = "<p class='note'>Groups export not provided.</p>"
 
     # Users
-    U = res["users"]
-
     def ucolor(u):
         if u["pctUsed"] is None:
             return ""
         return "bad" if u["pctUsed"] >= 100 else ("warn" if u["pctUsed"] >= near_pct else "")
-    top_html = bar_rows(U["top10"], "used", "displayName", total=U["total"] or None, color=ucolor)
-    tier_rows = "".join(f"<tr><td class='num'>{fmt(t['limit']) if t['limit'] else 'none'}</td><td class='num'>{t['users']}</td><td class='num'>{fmt(t['used'])}</td><td class='num'>{fmt(t['avgUsed'])}</td><td class='num'>{'-' if t['avgPctOfLimit'] is None else fmt(t['avgPctOfLimit'],0)+'%'}</td></tr>" for t in U["limitTiers"])
+    def names_for(rows, limit=12):
+        names = [html.escape(name(u)) for u in rows[:limit]]
+        suffix = f" and {len(rows) - limit} more" if len(rows) > limit else ""
+        return ", ".join(names) + suffix if rows else "None"
+    def user_flags(u):
+        flags = []
+        if u in U["overLimit"]:
+            flags.append('<span class="pill bad">Over limit</span>')
+        elif u in U["nearLimit"]:
+            flags.append('<span class="pill warn">Near limit</span>')
+        if u in U["dormant"]:
+            flags.append('<span class="pill muted-b">Dormant</span>')
+        if u in U["unlicensed"]:
+            flags.append('<span class="pill warn">Unlicensed</span>')
+        return " ".join(flags)
     urows = "".join(
-        f"<tr><td>{html.escape(name(u))}</td><td class='note'>{html.escape(upn(u))}</td><td class='num'>{fmt(u['used'])}</td><td class='num'>{fmt(u['limit'])}</td>"
-        f"<td class='num' data-v='{u['pctUsed'] or 0}'>{'-' if u['pctUsed'] is None else fmt(u['pctUsed'],0)+'%'}</td><td class='num'>{fmt(u.get('tasks'))}</td><td class='num'>{fmt(u.get('creditsPerTask'))}</td>"
-        f"<td class='num'>{fmt(u['sessions'])}</td><td>{'Yes' if u['licensed'] else '<b>No</b>'}</td><td>{u['lastActivity'] or '-'}</td>"
-        f"<td>{html.escape(u.get('department') or '-')}</td><td>{html.escape(u.get('manager') or '-')}</td></tr>" for u in U["all"])
-    watch = (f"<b>{len(U['overLimit'])}</b> over limit &middot; <b>{len(U['nearLimit'])}</b> near limit (&ge;{near_pct}%) &middot; "
-             f"<b>{len(U['dormant'])}</b> dormant &middot; <b>{len(U['unlicensed'])}</b> unlicensed consumers")
-    users_html = f"""<p class="note">Top 10 users = {fmt(U['top10Share'],1)}% of credits; top {U['top20pctCount']} users (20% of consumers) = {fmt(U['top20pctShare'],1)}%. Watchlist: {watch}.</p>
-    <div class="tabs"><button class="on" onclick="tab(this,'u-top')">Top consumers</button><button onclick="tab(this,'u-tiers')">Limit tiers</button><button onclick="tab(this,'u-all')">All users</button></div>
-    <div id="u-top" class="pane">{top_html}</div>
-    <div id="u-tiers" class="pane hide"><table><thead><tr><th class="num">Monthly limit</th><th class="num">Users</th><th class="num">Credits</th><th class="num">Avg per user</th><th class="num">Avg % of limit</th></tr></thead><tbody>{tier_rows}</tbody></table></div>
-    <div id="u-all" class="pane hide"><input class="search" placeholder="Filter users..." oninput="filterTable(this,'utab')"><div class="tw"><table id="utab"><thead><tr><th onclick="sortTable(this)">User</th><th onclick="sortTable(this)">UPN</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Limit</th><th class="num" onclick="sortTable(this)">% used</th><th class="num" onclick="sortTable(this)">Tasks</th><th class="num" onclick="sortTable(this)">Credits/task</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Licence</th><th onclick="sortTable(this)">Last activity</th><th onclick="sortTable(this)">Department</th><th onclick="sortTable(this)">Manager</th></tr></thead><tbody>{urows}</tbody></table></div></div>"""
+        f"<tr><td>{html.escape(name(u))}</td><td>{html.escape(u.get('department') or '-')}</td><td>{html.escape(u.get('manager') or '-')}</td><td class='num' data-v='{u['used']}'>{fmt(u['used'])}</td><td class='num' data-v='{u['limit'] or 0}'>{fmt(u['limit'])}</td>"
+        f"<td class='num' data-v='{u['pctUsed'] or 0}'>{'-' if u['pctUsed'] is None else fmt(u['pctUsed'],1)+'%'}</td><td class='num' data-v='{u.get('share') or 0}'>{fmt(u.get('share'),1)}%</td><td class='num' data-v='{u.get('tasks') or 0}'>{fmt(u.get('tasks'))}</td>"
+        f"<td class='num' data-v='{u.get('creditsPerTask') or 0}'>{fmt(u.get('creditsPerTask'))}</td><td class='num' data-v='{u['sessions']}'>{fmt(u['sessions'])}</td><td>{u['lastActivity'] or '-'}</td><td>{user_flags(u)}</td></tr>" for u in U["all"])
+    users_html = f"""<div class="grid4"><div class="card"><h4>Over 100% of limit ({len(U['overLimit'])})</h4><p>{names_for(U['overLimit'])}</p></div>
+    <div class="card"><h4>Near limit &ge; {near_pct}% ({len(U['nearLimit'])})</h4><p>{names_for(U['nearLimit'])}</p></div>
+    <div class="card"><h4>Dormant &gt; 30 days ({len(U['dormant'])})</h4><p>{names_for(U['dormant'])}</p></div>
+    <div class="card"><h4>Unlicensed consumers ({len(U['unlicensed'])})</h4><p>{names_for(U['unlicensed'])}</p></div></div>
+    <input class="filter" placeholder="Filter users, departments, managers..." oninput="filterTable(this,'utab')" style="margin-top:12px">
+    <div class="tw"><table id="utab"><thead><tr><th onclick="sortTable(this)">User</th><th onclick="sortTable(this)">Department</th><th onclick="sortTable(this)">Manager</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Limit</th><th class="num" onclick="sortTable(this)">% of limit</th><th class="num" onclick="sortTable(this)">Share</th><th class="num" onclick="sortTable(this)">Cowork tasks</th><th class="num" onclick="sortTable(this)">Credits / task</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Last activity</th><th onclick="sortTable(this)">Flags</th></tr></thead><tbody>{urows}</tbody></table></div>
+    <p class="muted">Cowork tasks come from the Cowork usage report and include pre-metering activity; credits per task is indicative.</p>"""
 
     # Departments & managers
     O = res["org"]
@@ -954,17 +981,16 @@ def render_html(res, anonymize=False):
             return "warn" if r["name"].startswith("(") else ""
         dept_rows = O["departments"]
         mgr_rows = O["managers"]
-        dept_html = f"""<p class="note">Directory coverage: {O['enrichedUsers']} of {res['users']['count']} consuming users matched ({fmt(O['coverage'],0)}%). Source: Microsoft Graph user profiles (department, manager) or an Entra user export.</p>
-        {bar_rows(dept_rows[:10], 'used', 'name', total=res['users']['total'] or None, color=dcolor)}
-        <div style="margin-top:12px">{org_table(dept_rows, 'Department')}</div>"""
-        mgr_html = f"""<p class="note">Manager roll-up uses each user's direct manager from the directory. Send each manager their own row - they decide whether their team's usage justifies the credits.</p>
-        {bar_rows(mgr_rows[:10], 'used', 'name', total=res['users']['total'] or None, color=dcolor)}
-        <div style="margin-top:12px">{org_table(mgr_rows, 'Manager')}</div>"""
+        org_intro = f"<p class=\"muted\">Department, job title and manager come from Microsoft Graph (read-only). Coverage: {O['enrichedUsers']} of {res['users']['count']} users ({fmt(O['coverage'],0)}%). This is a spend-control view, not a performance ranking.</p>"
+        dept_html = bar_rows(dept_rows[:10], 'used', 'name', total=res['users']['total'] or None, color=dcolor)
+        mgr_html = bar_rows(mgr_rows[:10], 'used', 'name', total=res['users']['total'] or None, color=dcolor)
         country_html = ""
         if O["countries"]:
             country_html = f"""<div class="card" style="margin-top:16px"><h4>Countries <span class="muted">usage location</span></h4>{bar_rows(O['countries'][:12], 'used', 'name', total=res['users']['total'] or None)}</div>"""
-        org_cards = (f'<div class="grid2"><div class="card"><h4>Credits by department</h4>{dept_html}</div>'
-                     f'<div class="card"><h4>Credits by manager</h4>{mgr_html}</div></div>{country_html}')
+        org_cards = (f'{org_intro}<div class="grid2"><div class="card"><h4>Credits by department</h4>{dept_html}</div>'
+                     f'<div class="card"><h4>Credits by manager</h4>{mgr_html}</div></div>'
+                     f'<h4 style="margin-top:16px">Department detail</h4>{org_table(dept_rows, "Department")}'
+                     f'<h4 style="margin-top:16px">Manager accountability view</h4>{org_table(mgr_rows, "Manager")}{country_html}')
     else:
         org_cards = ('<div class="card"><p class="note">No directory data was supplied. '
                      'Provide Microsoft Graph user data (<code>/users?$select=department,jobTitle,usageLocation&amp;$expand=manager</code>) or an Entra user export with '
@@ -972,7 +998,6 @@ def render_html(res, anonymize=False):
 
     # Recommendations
     rec_html = "".join(f'<div class="rec"><div class="rec-n">{i}</div><div><h4>{html.escape(r["title"])}</h4>'
-                       f'<p><b>Priority:</b> <span class="pill {r["priority"]}">{r["priority"]}</span></p>'
                        f'<p><b>Evidence:</b> {html.escape(r["evidence"])}</p><p><b>Action:</b> {html.escape(r["action"])}</p></div></div>'
                        for i, r in enumerate(res["recommendations"], 1)) or "<p class='muted'>No recommendations triggered.</p>"
 
@@ -997,11 +1022,11 @@ def render_html(res, anonymize=False):
 <nav><a href="#headline">Headline</a><a href="#services">Services</a><a href="#policies">Spending policies</a><a href="#org">Departments &amp; managers</a><a href="#groups">Groups</a><a href="#users">Users</a><a href="#recs">Recommendations</a><a href="#dq">Data quality</a></nav>
 <main>
 <section id="headline"><h2>Headline</h2><div class="kpis">{kpi_html}</div><p class="muted" style="margin-top:10px">{headline_note}</p></section>
-<section id="services"><h2>Service breakdown</h2><div class="grid2"><div class="card"><h4>Prepaid vs pay-as-you-go</h4>{svc_html}</div><div class="card"><h4>Forecast &amp; run-rate</h4>{fc_html}</div></div></section>
-<section id="policies"><h2>Spending-limit analysis</h2><div class="card">{pol_html}</div></section>
+<section id="services"><h2>Service breakdown</h2><div class="grid2"><div class="card"><h4>Prepaid vs pay-as-you-go</h4>{split_html}</div><div class="card"><h4>By service</h4>{svc_table_html}</div></div><div class="card" style="margin-top:12px"><h4>Forecast &amp; run-rate</h4>{fc_html}</div></section>
+<section id="policies"><h2>Spending-limit analysis</h2>{pol_html}</section>
 <section id="org"><h2>Departments &amp; managers</h2>{org_cards}</section>
-<section id="groups"><h2>Groups</h2><div class="card">{grp_html}</div></section>
-<section id="users"><h2>Users</h2><div class="card">{users_html}</div></section>
+<section id="groups"><h2>Groups</h2>{grp_html}</section>
+<section id="users"><h2>Users</h2>{users_html}</section>
 <section id="recs"><h2>Recommendations</h2>{rec_html}<p class="muted">This report only recommends. Policy, limit and billing-method changes are made in Microsoft 365 admin center &gt; Copilot &gt; Cost management.</p></section>
 <section id="dq"><h2>Data quality</h2><div class="card"><ul>{dq}<li>Exports are point-in-time snapshots; the live dashboard refreshes every 2 hours and may differ.</li><li>Usage above a per-user soft limit completes the task, is not billed, and is not shown as consumed credits.</li><li>The Microsoft invoice (Azure subscription named in the billing method) is the record of truth; costs here use {html.escape(res['meta']['paygRateBasis'])} {cur} {rate}/credit for pay-as-you-go and {html.escape(res['meta']['prepaidRateBasis'])} {cur} {res['meta']['prepaidRate']}/credit for prepaid.</li></ul><p class="muted">Inputs:</p><ul class="muted">{inputs}</ul></div></section>
 </main>
