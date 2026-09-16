@@ -4,7 +4,7 @@
 
 Copilot Cowork and the Work IQ API are billed in Copilot Credits. The Microsoft 365 admin center
 shows what was consumed - but tab by tab, as snapshots, with no join between *who*, *which policy*,
-*which group*, *how many tasks* and *what it cost*. This skill takes the five exports an admin
+*which group*, *how many tasks* and *what it cost*. This skill takes the five Cowork/work IQ related exports an admin
 already has and turns them into one interactive report an executive can read in two minutes.
 
 ## Why
