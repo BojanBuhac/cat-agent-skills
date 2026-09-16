@@ -60,6 +60,28 @@ def input_text(input_id: str = "requestTitle") -> dict:
     }
 
 
+def confirmed_action_card() -> dict:
+    card = base_card()
+    card["body"].append(
+        {
+            "type": "Input.Toggle",
+            "id": "acknowledgeOperation",
+            "label": "Operation confirmation",
+            "title": "I understand this operation cannot be undone.",
+            "isRequired": True,
+            "errorMessage": "Confirm the operation before proceeding.",
+        }
+    )
+    action = submit_action()
+    action["data"].update(
+        riskLevel="destructive",
+        requiresExplicitConfirmation=True,
+        confirmationInputId="acknowledgeOperation",
+    )
+    card["actions"] = [action]
+    return card
+
+
 class CardLinterTests(unittest.TestCase):
     def lint(self, card: dict, profile: str = "portable-1.5", mode: str = "auto"):
         return validate_cards.CardLinter(profile, mode).lint(card, "memory.json")
@@ -857,6 +879,119 @@ class CardLinterTests(unittest.TestCase):
         card["body"][0]["text"] = "Bearer " + ("a" * 26)
         result = self.lint(card)
         self.assertIn("PRIVACY.SECRET_VALUE", self.codes(result))
+
+    def test_custom_payload_strings_require_destructive_classification(self):
+        for payload in (
+            {"operation": "delete"},
+            {"custom": {"operation": "delete"}},
+            {"steps": ["inspect", {"operation": "delete"}]},
+            {"steps": [["delete"]]},
+            {"cardId": "delete_workspace_v1"},
+            {"actionSubmitId": "request_delete_v1"},
+        ):
+            with self.subTest(payload=payload):
+                card = base_card()
+                action = submit_action()
+                action["data"].update(payload)
+                card["actions"] = [action]
+                result = self.lint(card)
+                self.assertIn("SAFETY.RISK_CLASSIFICATION", self.codes(result))
+                self.assertIn("SAFETY.CONFIRMATION_FLAG", self.codes(result))
+                self.assertIn("SAFETY.CONFIRMATION_BINDING", self.codes(result))
+
+    def test_destructive_payload_prose_fails_closed_without_exceptions(self):
+        for text in ("Do not delete this item.", "Previously removed.", "deProvision"):
+            with self.subTest(text=text):
+                card = base_card()
+                action = submit_action()
+                action["data"]["description"] = text
+                card["actions"] = [action]
+                self.assertIn("SAFETY.RISK_CLASSIFICATION", self.codes(self.lint(card)))
+
+    def test_multiword_destructive_identifiers_require_classification(self):
+        for term in ("drop database", "factory reset", "format device"):
+            words = term.split()
+            variants = (
+                term,
+                "_".join(words),
+                "-".join(words),
+                ".".join(words),
+                words[0] + "".join(word.title() for word in words[1:]),
+                "_".join(words).upper(),
+                "request_" + "_".join(words) + "_v1",
+            )
+            for text in variants:
+                for surface in ("title", "actionId", "operation"):
+                    with self.subTest(text=text, surface=surface):
+                        card = base_card()
+                        action = submit_action()
+                        if surface == "title":
+                            action["title"] = text
+                        else:
+                            action["data"][surface] = text
+                        card["actions"] = [action]
+                        self.assertIn(
+                            "SAFETY.RISK_CLASSIFICATION", self.codes(self.lint(card))
+                        )
+
+    def test_benign_payload_values_do_not_require_destructive_classification(self):
+        for payload in (
+            {"operation": "archive"},
+            {"steps": ["inspect", {"operation": "preview"}], "limit": 5, "dryRun": True},
+            {"first": "drop", "second": "database"},
+            {"delete": False},
+        ):
+            with self.subTest(payload=payload):
+                card = base_card()
+                action = submit_action()
+                action["data"].update(payload)
+                card["actions"] = [action]
+                result = self.lint(card)
+                self.assertTrue(result.passes(warnings_as_errors=True), result.errors)
+
+    def test_classified_custom_operation_with_confirmation_passes(self):
+        card = confirmed_action_card()
+        card["actions"][0]["data"]["custom"] = {"steps": ["delete"]}
+        result = self.lint(card)
+        self.assertTrue(result.passes(warnings_as_errors=True), result.errors)
+
+    def test_confirmation_uses_literal_schema_default(self):
+        for values, expected in (
+            ({}, None),
+            ({"valueOn": "false", "valueOff": "true"}, "SAFETY.PRECHECKED_CONFIRMATION"),
+            ({"valueOn": "yes", "valueOff": "no"}, "SAFETY.CONFIRMATION_INITIAL_VALUE"),
+            ({"valueOn": "yes", "valueOff": "false"}, None),
+        ):
+            with self.subTest(values=values):
+                card = confirmed_action_card()
+                card["body"][1].update(values)
+                result = self.lint(card)
+                self.assertEqual(self.codes(result), {expected} if expected else set())
+                self.assertFalse(result.warnings)
+
+    def test_confirmation_custom_explicit_initial_values(self):
+        for on, off, initial, expected in (
+            ("false", "true", "true", None),
+            ("false", "true", "false", "SAFETY.PRECHECKED_CONFIRMATION"),
+            ("yes", "no", "no", None),
+            ("yes", "no", "yes", "SAFETY.PRECHECKED_CONFIRMATION"),
+            ("yes", "no", "unknown", "SAFETY.CONFIRMATION_INITIAL_VALUE"),
+            ("yes", "no", "", "SAFETY.CONFIRMATION_INITIAL_VALUE"),
+            ("yes", "no", None, "SAFETY.CONFIRMATION_INITIAL_VALUE"),
+        ):
+            with self.subTest(on=on, off=off, initial=initial):
+                card = confirmed_action_card()
+                card["body"][1].update(valueOn=on, valueOff=off, value=initial)
+                result = self.lint(card)
+                self.assertEqual(self.codes(result), {expected} if expected else set())
+                self.assertFalse(result.warnings)
+
+    def test_confirmation_initial_state_policy_is_destructive_only(self):
+        card = confirmed_action_card()
+        card["body"][1].update(valueOn="false", valueOff="true")
+        card["actions"] = [submit_action()]
+        result = self.lint(card)
+        self.assertTrue(result.passes(warnings_as_errors=True), result.errors)
 
     def test_destructive_action_requires_confirmation(self):
         card = base_card()

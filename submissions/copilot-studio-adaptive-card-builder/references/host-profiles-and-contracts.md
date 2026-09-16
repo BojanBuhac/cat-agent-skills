@@ -163,9 +163,41 @@ still untrusted and must be checked downstream.
 
 `riskLevel` is required and must be `none`, `consequential`, or `destructive`. A destructive action also requires `confirmationInputId`, `requiresExplicitConfirmation: true`, and a matching initially-off required confirmation toggle with distinct on and off values. Escape actions can use `associatedInputs: "none"` when they must bypass incomplete form validation, but they must declare `riskLevel: "none"` and `isEscapeAction: true`. Consequential and destructive actions cannot bypass associated inputs.
 
+**Rule: a submit action must declare destructive risk whenever its title or
+any string value anywhere in its data contains a listed destructive operation,
+treating identifier separators and camel case like spaces, with no exceptions.**
+
+The list is `delete`, `remove`, `revoke`, `terminate`, `destroy`, `erase`, `purge`,
+`wipe`, `factory reset`, `deprovision`, `format device`, and `drop database`.
+Scanning includes custom keys' string values and strings nested in objects or
+arrays, but not the property names themselves. Each string is checked separately;
+unrelated values are not joined into a phrase. Existing case-insensitive substring
+matches are preserved, so inflections such as "deleted" still trigger the gate.
+`drop_database`, `factory-reset`, `factoryReset`, and `format-device` also trigger
+it. This is deliberately conservative: even "do not delete" in payload prose
+requires `riskLevel: "destructive"` and the existing confirmation safeguards.
+There is no exception list or card-supplied bypass. A clean result still cannot
+prove that the downstream operation is reversible; classify its actual effect.
+
 Confirmation is bound by the exact toggle ID, not a naming convention. For
 example, `acknowledgeDeletion` is valid when `confirmationInputId` names it and
 the toggle satisfies all confirmation requirements.
+
+The [published Input.Toggle schema](https://github.com/microsoft/AdaptiveCards/blob/8b62e1d5700192578050a4fe255658811e67ce43/schemas/src/elements/inputs/Input.Toggle.json#L11-L24)
+declares `value`'s default as the literal string `"false"`, independently of
+`valueOff`. The confirmation check applies that default, then requires the
+effective value to equal `valueOff` and differ from `valueOn`. An on value reports
+`SAFETY.PRECHECKED_CONFIRMATION`; any other non-off/ambiguous initial value reports
+`SAFETY.CONFIRMATION_INITIAL_VALUE`. Set `value` explicitly to `valueOff` when
+authoring a confirmation, especially with custom on/off values. For example,
+`valueOn: "false"` and `valueOff: "true"` require `value: "true"`.
+
+This is a schema-based safety policy, not proof of host rendering. The
+[JavaScript renderer's optional value property](https://github.com/microsoft/AdaptiveCards/blob/8b62e1d5700192578050a4fe255658811e67ce43/source/nodejs/adaptivecards/src/card-elements.ts#L4050-L4075)
+does not declare the schema's default, and its
+[checked-state test](https://github.com/microsoft/AdaptiveCards/blob/8b62e1d5700192578050a4fe255658811e67ce43/source/nodejs/adaptivecards/src/card-elements.ts#L4134-L4138)
+compares the parsed value with `valueOn`. Do not assume identical omitted-value
+behavior across hosts; explicitly set the off value and verify the target host.
 
 ### Conditional downstream input validation
 

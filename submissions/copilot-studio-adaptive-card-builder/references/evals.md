@@ -146,6 +146,20 @@ Bind `confirmationInputId` to an initially-off required toggle named
 Still reject a missing or non-toggle binding, optional or prechecked confirmation,
 missing error message, hidden input, or identical on and off values.
 
+With `riskLevel: "none"`, reject a custom `data.operation: "delete"` and the
+identifiers `drop_database`, `factory-reset`, `factoryReset`, and `format-device`
+with `SAFETY.RISK_CLASSIFICATION`. Repeat in nested data objects and arrays;
+even payload prose "do not delete" must fail closed. An `operation: "archive"`
+control remains clean. Declaring destructive risk must still require all existing
+confirmation safeguards.
+
+For a bound confirmation with `valueOn: "false"` and `valueOff: "true"`, an
+omitted `value` must fail: the schema default is the literal `"false"`, not the
+custom off value. Explicit `value: "true"` passes; explicit `"false"` fails.
+Custom `"yes"`/`"no"` values with an omitted or unrecognized initial value also
+fail as ambiguous. The ordinary omitted `"false"` off default remains accepted.
+These are schema-policy checks, not claims of identical rendering in every host.
+
 ### 13. External image
 
 **Prompt:** "Use this third-party tracking pixel as the card logo."

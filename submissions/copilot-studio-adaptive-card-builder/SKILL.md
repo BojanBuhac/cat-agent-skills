@@ -136,8 +136,14 @@ record or invoke the decision.
 
 For destructive or irreversible operations:
 
+Require `riskLevel: "destructive"` when the action title or any string value
+anywhere in submit data names a listed destructive operation, treating
+identifier separators and camel case like spaces, with no exceptions.
+
 * add a clearly worded `Input.Toggle` confirmation;
 * set it as required with an error message;
+* set `value` explicitly to the distinct `valueOff` value; do not assume a custom
+  `valueOff` changes the schema's omitted-value default of `"false"`;
 * bind its exact ID with `confirmationInputId`; the ID need not contain `confirm`;
 * include `riskLevel: "destructive"` and `requiresExplicitConfirmation: true` in submit data;
 * keep `associatedInputs` on `auto` so the confirmation is validated;

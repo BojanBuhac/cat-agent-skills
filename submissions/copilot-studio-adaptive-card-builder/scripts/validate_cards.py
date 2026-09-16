@@ -105,6 +105,25 @@ def tokenize_sensitive_name(value: str) -> list[str]:
     return re.findall(r"[A-Za-z0-9]+", value.lower())
 
 
+def string_values(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for child in value.values():
+            yield from string_values(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from string_values(child)
+
+
+def is_destructive_text(value: str) -> bool:
+    normalized = " ".join(tokenize_sensitive_name(value))
+    # Preserve existing substring detections while also recognizing identifiers.
+    return any(
+        term in value.lower() or term in normalized for term in DESTRUCTIVE_TERMS
+    )
+
+
 SECRET_FIELD_TERMS = {
     "api key",
     "api token",
@@ -1107,12 +1126,10 @@ class CardLinter:
 
     def _check_destructive_actions(self) -> None:
         for action, path in self.submit_actions:
-            text_parts = [str(action.get("title", ""))]
+            text_parts = list(string_values(action.get("title")))
             data = action.get("data")
-            if isinstance(data, dict):
-                text_parts.extend(str(data.get(key, "")) for key in ("actionId", "intent"))
-            normalized = " ".join(text_parts).lower()
-            known_destructive = any(term in normalized for term in DESTRUCTIVE_TERMS)
+            text_parts.extend(string_values(data))
+            known_destructive = any(is_destructive_text(text) for text in text_parts)
             declared_destructive = (
                 isinstance(data, dict) and data.get("riskLevel") == "destructive"
             )
@@ -1169,14 +1186,21 @@ class CardLinter:
                         path,
                         "The bound confirmation toggle must be required and have an errorMessage.",
                     )
-                value_on = str(toggle.get("valueOn", "true"))
-                value_off = str(toggle.get("valueOff", "false"))
-                initial_value = str(toggle.get("value", value_off))
+                value_on = toggle.get("valueOn", "true")
+                value_off = toggle.get("valueOff", "false")
+                initial_value = toggle.get("value", "false")
                 if initial_value == value_on:
                     self.error(
                         "SAFETY.PRECHECKED_CONFIRMATION",
                         f"{path}.data.confirmationInputId",
                         "The bound confirmation toggle must be initially off.",
+                    )
+                elif not isinstance(initial_value, str) or initial_value != value_off:
+                    self.error(
+                        "SAFETY.CONFIRMATION_INITIAL_VALUE",
+                        f"{path}.data.confirmationInputId",
+                        'The bound confirmation toggle value must equal valueOff; '
+                        'an omitted value defaults to the literal string "false".',
                     )
 
     def _check_mobile_density(self, card: dict[str, Any]) -> None:
