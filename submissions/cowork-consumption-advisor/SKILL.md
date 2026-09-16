@@ -114,9 +114,11 @@ Directory enrichment is optional and requires a Users export with UPNs; skip it 
 ### Step 3: Run the analysis script
 ```
 python scripts/analyze_consumption.py --input <files or folder> --org working/org/ --out working/consumption \
-  [--title "..."] [--currency EUR --rate 0.0092] [--prepaid-rate 0.008] \
+  [--tenant-name "..."] [--title "..."] [--currency EUR --rate 0.0092] [--prepaid-rate 0.008] \
   [--period auto|monthly|ytd] [--as-of YYYY-MM-DD] [--near-limit 0.8] [--dormant-days 30] [--anonymize]
 ```
+- Use `--tenant-name "<Company>"` for the normal executive report title. If `--anonymize` is also
+  passed, the company name is suppressed in all outputs.
 - Pass `--as-of` with the export date whenever the file names do not carry one (the admin center
   default names do: `...9_14_2026 10_50_29 AM.csv`). Otherwise the script uses today's date.
 - Defaults: pay-as-you-go list rate 0.01 per credit, prepaid 0.008 (a 25,000-credit pack at 200).

@@ -24,7 +24,7 @@ Usage:
         [--rate 0.01] [--prepaid-rate 0.008] [--currency USD]
         [--period auto|monthly|ytd] [--near-limit 0.8] [--dormant-days 30]
         [--org <folder-or-files of Graph JSON / org CSV>]
-        [--title "Contoso - Cowork consumption"] [--anonymize]
+        [--tenant-name Contoso] [--title "Contoso - Cowork consumption"] [--anonymize]
 """
 from __future__ import annotations
 
@@ -726,7 +726,7 @@ def analyze(data, args, as_of):
 
     result = {
         "meta": {
-            "title": "Anonymized Cowork & Work IQ Consumption Report" if args.anonymize else args.title,
+            "title": "Anonymized Cowork & Work IQ Consumption Report" if args.anonymize else args.report_title,
             "asOf": as_of.isoformat(), "currency": args.currency,
             "paygRate": args.rate, "prepaidRate": args.prepaid_rate,
             "paygRateBasis": rate_basis, "prepaidRateBasis": prepaid_basis,
@@ -1058,6 +1058,7 @@ def main(argv=None):
     ap.add_argument("--as-of", help="report date YYYY-MM-DD (default: latest date in the exports, else today)")
     ap.add_argument("--near-limit", type=float, default=0.8)
     ap.add_argument("--dormant-days", type=int, default=30)
+    ap.add_argument("--tenant-name", help="tenant/company name to show in non-anonymized report titles")
     ap.add_argument("--title", default="Cowork & Work IQ Consumption Report")
     ap.add_argument("--anonymize", action="store_true",
                     help="replace user and manager names/UPNs with stable pseudonyms in ALL outputs (HTML, JSON, Markdown)")
@@ -1070,6 +1071,11 @@ def main(argv=None):
         print("ERROR: --rate and --prepaid-rate must be finite non-negative numbers", file=sys.stderr)
         return 2
     args.currency = args.currency.upper()
+    default_title = ap.get_default("title")
+    if args.tenant_name and args.title == default_title:
+        args.report_title = f"{clean(args.tenant_name)} - Cowork & Work IQ consumption"
+    else:
+        args.report_title = args.title
     files = collect_inputs(args.input, exts=(".csv", ".json"))
     json_files = [f for f in files if f.lower().endswith(".json")]
     files = [f for f in files if not f.lower().endswith(".json")]
