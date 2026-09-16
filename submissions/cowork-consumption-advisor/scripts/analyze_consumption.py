@@ -726,7 +726,8 @@ def analyze(data, args, as_of):
 
     result = {
         "meta": {
-            "title": args.title, "asOf": as_of.isoformat(), "currency": args.currency,
+            "title": "Anonymized Cowork & Work IQ Consumption Report" if args.anonymize else args.title,
+            "asOf": as_of.isoformat(), "currency": args.currency,
             "paygRate": args.rate, "prepaidRate": args.prepaid_rate,
             "paygRateBasis": rate_basis, "prepaidRateBasis": prepaid_basis,
             "inputs": {k: ("<redacted>" if args.anonymize else v) for k, v in data.get("_files", {}).items()},
