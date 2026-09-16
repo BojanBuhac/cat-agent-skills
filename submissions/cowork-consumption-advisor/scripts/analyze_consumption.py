@@ -372,6 +372,18 @@ def anonymize_data(data):
     for x in data.get("cowork_usage", []):
         x["displayName"] = pseudonym("User", x["upnKey"])
         x["upn"] = pseudonym("user", x["upnKey"]).replace(" ", "") + "@hidden"
+    for g in data.get("groups", []):
+        if g.get("name"):
+            g["name"] = pseudonym("Group", g["name"], 8)
+        if g.get("groupId"):
+            g["groupId"] = pseudonym("group", g["groupId"], 8).replace(" ", "")
+    for p in data.get("policies", []):
+        if p.get("name"):
+            p["name"] = pseudonym("Policy", p["name"], 8)
+        if p.get("appliesTo"):
+            p["appliesTo"] = pseudonym("Scope", p["appliesTo"], 8)
+        if p.get("billingMethod"):
+            p["billingMethod"] = pseudonym("Billing", p["billingMethod"], 8)
     seen_org = set()
     for k, o in (data.get("org") or {}).items():
         if id(o) in seen_org:
@@ -382,6 +394,10 @@ def anonymize_data(data):
         o["manager"] = pseudonym("Manager", manager_key, 8) if manager_key else ""
         o["managerUpn"] = pseudonym("manager", manager_key, 8).replace(" ", "") + "@hidden" if manager_key else ""
         o["upn"] = pseudonym("user", user_key).replace(" ", "") + "@hidden"
+        for field, prefix in (("department", "Department"), ("jobTitle", "Job"), ("country", "Location"),
+                              ("office", "Office"), ("costCenter", "CostCenter")):
+            if o.get(field):
+                o[field] = pseudonym(prefix, o[field], 8)
     return data
 
 
