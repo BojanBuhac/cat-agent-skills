@@ -77,8 +77,12 @@ diagnostics/
 For each PDF, run:
 
 ```text
-python scripts/pdf_image_extractor.py render --input <document.pdf> --output-dir semantic-image-output --document-id <document-id> --dpi 220
+python scripts/pdf_image_extractor.py render --input "<document.pdf>" --output-dir "semantic-image-output" --document-id "<document-id>" --dpi 220
 ```
+
+When the user supplies page ranges, add `--page-range "<first>-<last>"` for each range to the same
+render command. The helper preserves original PDF page numbers in filenames and diagnostics.
+Inspect and package only the selected pages.
 
 If optional libraries are unavailable, use native runtime PDF rendering. If neither path can render a PDF, report the affected source and continue with other readable sources. Do not claim that unrendered pages were inspected.
 
@@ -139,7 +143,7 @@ Each proposal can contain an `assetBox` and optional `contextBox`. Use globally 
 Run:
 
 ```text
-python scripts/pdf_image_extractor.py crop --output-dir semantic-image-output --regions semantic-image-output/diagnostics/region-proposals.json
+python scripts/pdf_image_extractor.py crop --output-dir "semantic-image-output" --regions "semantic-image-output/diagnostics/region-proposals.json"
 ```
 
 The helper clamps coordinates, rejects unsafe paths and invalid regions, creates asset and context crops, calculates SHA-256 and perceptual hashes when available, and records dimensions and file sizes.
@@ -160,7 +164,7 @@ Group exact and near-duplicates across pages and documents. Preserve every occur
 Use the helper's duplicate suggestions as candidates, not final semantic decisions:
 
 ```text
-python scripts/pdf_image_extractor.py duplicates --output-dir semantic-image-output --crop-results semantic-image-output/diagnostics/crop-results.json
+python scripts/pdf_image_extractor.py duplicates --output-dir "semantic-image-output" --crop-results "semantic-image-output/diagnostics/crop-results.json"
 ```
 
 Use statuses:
@@ -195,7 +199,7 @@ Create `summary.md` with sources, selected mode, counts by type and status, dupl
 Run:
 
 ```text
-python scripts/pdf_image_extractor.py package --output-dir semantic-image-output --manifest semantic-image-output/manifest.json --archive <output.zip>
+python scripts/pdf_image_extractor.py package --output-dir "semantic-image-output" --manifest "semantic-image-output/manifest.json" --archive "<output.zip>"
 ```
 
 Return the ZIP and report:

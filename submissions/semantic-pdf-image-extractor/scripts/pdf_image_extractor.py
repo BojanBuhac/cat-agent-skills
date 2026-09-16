@@ -25,6 +25,7 @@ DUPLICATE_RESULT_VERSION = "semantic-pdf-image-duplicates/1.0"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 HASH_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 PERCEPTUAL_HASH_PATTERN = re.compile(r"^[a-f0-9]{16}$")
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 DATE_TIME_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 )
@@ -113,6 +114,16 @@ def require_id(value: Any, field: str) -> str:
     return value
 
 
+def parse_page_range(value: str) -> tuple[int, int]:
+    match = re.fullmatch(r"([1-9]\d*)-([1-9]\d*)", value)
+    if match is None:
+        raise argparse.ArgumentTypeError("page range must use FROM-TO positive integers")
+    start, end = (int(item) for item in match.groups())
+    if start > end:
+        raise argparse.ArgumentTypeError("page range FROM must be less than or equal to TO")
+    return start, end
+
+
 def require_string_array(value: Any, field: str, unique: bool = False) -> list[str]:
     require(isinstance(value, list) and all(isinstance(item, str) for item in value),
             f"{field} must be an array of strings")
@@ -146,6 +157,15 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def require_png_signature(path: Path, field: str) -> None:
+    try:
+        with path.open("rb") as handle:
+            signature = handle.read(len(PNG_SIGNATURE))
+    except OSError as exc:
+        raise ValidationError(f"Cannot read {field}: {exc}") from exc
+    require(signature == PNG_SIGNATURE, f"{field} must be a PNG file")
 
 
 def normalized_pixel_box(box: list[float], width: int, height: int) -> tuple[int, int, int, int]:
@@ -256,6 +276,7 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
     page_lookup: dict[tuple[str, int], str] = {}
     referenced_paths: set[str] = set()
     page_count = 0
+    page_review_required = False
     document_keys = {"id", "sourceFile", "sha256", "title", "languages", "pageCount", "pages"}
     page_keys = {"pageNumber", "image", "width", "height", "status", "reviewReasons"}
     for document_index, document in enumerate(documents):
@@ -295,6 +316,8 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
             reasons = require_string_array(page["reviewReasons"], f"{page_field}.reviewReasons")
             if page["status"] != "verified":
                 require(bool(reasons), f"{page_field} needs at least one review reason")
+            if page["status"] == "review-required":
+                page_review_required = True
             for dimension in ("width", "height"):
                 value = page[dimension]
                 require(value is None or (isinstance(value, int) and not isinstance(value, bool) and value >= 1),
@@ -338,6 +361,7 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
     require(isinstance(assets, list), "assets must be an array")
     asset_ids: set[str] = set()
     occurrence_ids: set[str] = set()
+    occurrence_output_paths: set[str] = set()
     occurrence_asset: dict[str, str] = {}
     review_required_occurrences: set[str] = set()
     asset_group_ids: dict[str, str | None] = {}
@@ -391,6 +415,9 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
                                                  f"{occurrence_field}.assetImage"))
             require(asset_image.startswith(f"assets/{document_id}/") and asset_image.lower().endswith(".png"),
                     f"{occurrence_field}.assetImage must be a PNG below assets/{document_id}/")
+            require(asset_image not in occurrence_output_paths,
+                    f"{occurrence_field}.assetImage duplicates another occurrence output")
+            occurrence_output_paths.add(asset_image)
             context_image_value = occurrence["contextImage"]
             require((context_region is None) == (context_image_value is None),
                     f"{occurrence_field}.contextImage and contextRegion must be provided together")
@@ -401,6 +428,9 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
                 require(context_image.startswith(f"context/{document_id}/")
                         and context_image.lower().endswith(".png"),
                         f"{occurrence_field}.contextImage must be a PNG below context/{document_id}/")
+                require(context_image not in occurrence_output_paths,
+                        f"{occurrence_field}.contextImage duplicates another occurrence output")
+                occurrence_output_paths.add(context_image)
             fallback = str(safe_relative_path(occurrence["fullPageFallback"],
                                               f"{occurrence_field}.fullPageFallback"))
             require(fallback == page_lookup[(document_id, page_number)],
@@ -501,14 +531,15 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
     required_assets = {occurrence_asset[item] for item in review_required_occurrences}
     require(required_assets.issubset(set(review_asset_ids)),
             "Assets with review-required occurrences must appear in review.assetIds")
-    expected_review = bool(review_asset_ids or review_occurrence_ids or notes)
+    expected_review = page_review_required or bool(review_asset_ids or review_occurrence_ids or notes)
     require(review["required"] is expected_review,
             "review.required must reflect the review IDs and notes")
     require_string_array(manifest["limitations"], "limitations")
 
     if output_dir is not None:
         for path in sorted(referenced_paths):
-            resolve_output_path(output_dir, path, path)
+            resolved_path = resolve_output_path(output_dir, path, path)
+            require_png_signature(resolved_path, path)
     return {
         "documentCount": len(documents),
         "pageCount": page_count,
@@ -624,10 +655,20 @@ def command_render(args: argparse.Namespace) -> None:
         document = pdfium.PdfDocument(str(input_path))
     except Exception as exc:
         raise ValidationError(f"Cannot open PDF; it may be corrupt or encrypted: {exc}") from exc
-    require(len(document) > 0, "PDF contains no pages")
+    total_page_count = len(document)
+    require(total_page_count > 0, "PDF contains no pages")
+    requested_ranges = args.page_ranges or [(1, total_page_count)]
+    require(all(end <= total_page_count for _, end in requested_ranges),
+            "Render page range cannot exceed the PDF page count")
+    selected_page_numbers = sorted({
+        page_number
+        for start, end in requested_ranges
+        for page_number in range(start, end + 1)
+    })
     scale = args.dpi / 72
     rendered_pages: list[dict[str, Any]] = []
-    for page_index in range(len(document)):
+    for page_number in selected_page_numbers:
+        page_index = page_number - 1
         page = document[page_index]
         bitmap = page.render(scale=scale)
         image = bitmap.to_pil()
@@ -647,7 +688,9 @@ def command_render(args: argparse.Namespace) -> None:
         "documentId": document_id,
         "sourceFile": input_path.name,
         "sourceSha256": file_sha256(input_path),
-        "pageCount": len(rendered_pages),
+        "pageCount": total_page_count,
+        "renderedPageCount": len(rendered_pages),
+        "pageRanges": [{"from": start, "to": end} for start, end in requested_ranges],
         "dpi": args.dpi,
         "pages": rendered_pages
     }
@@ -958,8 +1001,11 @@ def command_self_test(_: argparse.Namespace) -> None:
         page_path = root / "pages" / "test-document" / "page-0001.png"
         first_asset_path = root / "assets" / "test-document" / "asset-0001.png"
         second_asset_path = root / "assets" / "test-document" / "asset-0002.png"
-        for path, content in ((page_path, b"test-page"), (first_asset_path, b"same-asset"),
-                              (second_asset_path, b"same-asset")):
+        for path, content in (
+            (page_path, PNG_SIGNATURE + b"test-page"),
+            (first_asset_path, PNG_SIGNATURE + b"same-asset"),
+            (second_asset_path, PNG_SIGNATURE + b"same-asset"),
+        ):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
         (root / "summary.md").write_text("# Self-test\n", encoding="utf-8")
@@ -1103,6 +1149,43 @@ def command_self_test(_: argparse.Namespace) -> None:
             lambda value: value["assets"][0]["occurrences"][0].update({"pageNumber": True})
         )
         expect_manifest_error(
+            "duplicate occurrence asset output",
+            lambda value: value["assets"][1]["occurrences"][0].update(
+                {"assetImage": "assets/test-document/asset-0001.png"}
+            )
+        )
+        expect_manifest_error(
+            "duplicate occurrence context output",
+            lambda value: [
+                occurrence_value.update({
+                    "contextRegion": [0.1, 0.1, 0.5, 0.5],
+                    "contextImage": "context/test-document/shared.png"
+                })
+                for asset_value in value["assets"]
+                for occurrence_value in asset_value["occurrences"]
+            ]
+        )
+        expect_manifest_error(
+            "unreported page review state",
+            lambda value: value["documents"][0]["pages"][0].update(
+                {"status": "review-required", "reviewReasons": ["Check rendered page"]}
+            )
+        )
+        page_review_manifest = copy.deepcopy(manifest)
+        page_review_manifest["documents"][0]["pages"][0].update(
+            {"status": "review-required", "reviewReasons": ["Check rendered page"]}
+        )
+        page_review_manifest["review"]["required"] = True
+        validate_manifest_data(page_review_manifest)
+        require(parse_page_range("2-4") == (2, 4), "Self-test page-range parser changed values")
+        for invalid_range in ("0-1", "3-2", "1", "true-2"):
+            try:
+                parse_page_range(invalid_range)
+            except argparse.ArgumentTypeError:
+                pass
+            else:
+                raise ValidationError(f"Self-test accepted invalid render page range: {invalid_range}")
+        expect_manifest_error(
             "non-canonical manifest page image",
             lambda value: value["documents"][0]["pages"][0].update(
                 {"image": "pages/test-document/other.png"}
@@ -1119,6 +1202,12 @@ def command_self_test(_: argparse.Namespace) -> None:
             lambda: validate_region_proposals(mismatched_regions),
             "non-canonical region proposal page image"
         )
+        first_asset_path.write_bytes(b"not-a-png")
+        expect_validation_error(
+            lambda: validate_manifest_data(manifest, root),
+            "invalid PNG artifact"
+        )
+        first_asset_path.write_bytes(PNG_SIGNATURE + b"same-asset")
 
         crop_results_path = root / "diagnostics" / "crop-results.json"
         write_json(crop_results_path, {
@@ -1289,11 +1378,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 
-    render = commands.add_parser("render", help="Render every PDF page to PNG")
+    render = commands.add_parser("render", help="Render selected PDF pages to PNG")
     render.add_argument("--input", required=True)
     render.add_argument("--output-dir", required=True)
     render.add_argument("--document-id", required=True)
     render.add_argument("--dpi", type=int, default=220, choices=range(120, 401), metavar="120-400")
+    render.add_argument("--page-range", dest="page_ranges", type=parse_page_range, action="append",
+                        metavar="FROM-TO")
     render.set_defaults(handler=command_render)
 
     crop = commands.add_parser("crop", help="Create asset and context crops from normalized proposals")
