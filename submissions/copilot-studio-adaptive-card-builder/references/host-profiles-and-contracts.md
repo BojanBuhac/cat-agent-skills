@@ -344,6 +344,14 @@ Text PASS/FAIL and passed-card counts, JSON `results[].ok`, and the process exit
 code use the same policy: errors fail; warnings also fail with
 `--warnings-as-errors`. Warning diagnostics remain in the warnings list.
 
+Version components are limited to nine decimal digits before integer conversion,
+independently of the Python runtime's integer-string limit; oversized components
+report `ROOT.VERSION`. URL-parser failures report `OPENURL.HTTPS`, and regex
+syntax, repetition-overflow, or parser-recursion failures report `INPUT.REGEX`.
+These rejected values must produce diagnostics in text and JSON output, not an
+uncaught traceback. Compiling a card-supplied regex does not prove safe runtime
+matching in the target host; the linter does not execute that regex.
+
 ```yaml
 validation:
   validator: copilot-studio-adaptive-card-linter

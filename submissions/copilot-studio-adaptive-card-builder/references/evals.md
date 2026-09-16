@@ -46,6 +46,12 @@ Use these scenarios to test activation, platform truthfulness, package completen
 
 ## Validation
 
+Malformed card values must produce diagnostics, not tracebacks. A version with
+a 5000-digit component reports `ROOT.VERSION`; `https://[::1` in an OpenUrl action
+reports `OPENURL.HTTPS`. Regex repetition overflow and excessive nested groups
+report `INPUT.REGEX`. Check both text and JSON output for the expected code and
+empty stderr, rather than accepting a nonzero exit code alone.
+
 ### 6. Duplicate inputs
 
 **Prompt:** Supply a card with two inputs using `id: "email"`.

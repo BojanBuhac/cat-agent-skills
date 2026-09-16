@@ -401,7 +401,8 @@ class CardLinter:
             self.error(
                 "ROOT.VERSION",
                 "$.version",
-                'Root "version" must be a major.minor string such as "1.5".',
+                'Root "version" must be a major.minor string such as "1.5", '
+                "with at most nine digits per component.",
             )
         else:
             self.card_version = parsed_version
@@ -467,7 +468,7 @@ class CardLinter:
 
     @staticmethod
     def _parse_version(value: Any) -> tuple[int, int] | None:
-        if not isinstance(value, str) or not re.fullmatch(r"\d+\.\d+", value):
+        if not isinstance(value, str) or not re.fullmatch(r"\d{1,9}\.\d{1,9}", value):
             return None
         major, minor = value.split(".", 1)
         return int(major), int(minor)
@@ -754,7 +755,7 @@ class CardLinter:
             else:
                 try:
                     re.compile(regex)
-                except re.error as error:
+                except (re.error, OverflowError, RecursionError) as error:
                     self.error(
                         "INPUT.REGEX",
                         f"{path}.regex",
@@ -1016,8 +1017,12 @@ class CardLinter:
                 "OPENURL.URL", f"{path}.url", "Action.OpenUrl requires a URL."
             )
             return
-        parsed = urlparse(url)
-        if parsed.scheme.lower() != "https" or not parsed.netloc:
+        try:
+            parsed = urlparse(url)
+            valid_https = parsed.scheme.lower() == "https" and bool(parsed.netloc)
+        except ValueError:
+            valid_https = False
+        if not valid_https:
             self.error(
                 "OPENURL.HTTPS",
                 f"{path}.url",

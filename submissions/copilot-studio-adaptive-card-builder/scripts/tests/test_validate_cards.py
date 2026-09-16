@@ -89,6 +89,34 @@ class CardLinterTests(unittest.TestCase):
     def codes(self, result) -> set[str]:
         return {item.code for item in result.errors}
 
+    def assert_card_diagnostic_without_traceback(self, card: dict, code: str):
+        self.assertIn(code, self.codes(self.lint(card)))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.json"
+            path.write_text(json.dumps(card), encoding="utf-8")
+            for output_format in ("text", "json"):
+                with self.subTest(output_format=output_format):
+                    process = subprocess.run(
+                        [
+                            sys.executable, "-B", str(SCRIPT_PATH), str(path),
+                            "--format", output_format, "--warnings-as-errors",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=15,
+                    )
+                    self.assertEqual(process.returncode, 1)
+                    self.assertEqual(process.stderr, "")
+                    self.assertNotIn("Traceback", process.stdout)
+                    if output_format == "json":
+                        result = json.loads(process.stdout)["results"][0]
+                        self.assertFalse(result["ok"])
+                        self.assertIn(code, {item["code"] for item in result["errors"]})
+                    else:
+                        self.assertIn("FAIL ", process.stdout)
+                        self.assertIn(code, process.stdout)
+
     def test_valid_informational_card(self):
         result = self.lint(base_card(), mode="informational")
         self.assertTrue(result.ok)
@@ -223,6 +251,33 @@ class CardLinterTests(unittest.TestCase):
         card["version"] = "1.6"
         result = self.lint(card, profile="teams-1.5")
         self.assertIn("HOST.VERSION", self.codes(result))
+
+    def test_oversized_version_components_report_diagnostic(self):
+        for version in ("9" * 5000 + ".5", "1." + "9" * 5000, "1234567890.5"):
+            with self.subTest(component_length=max(map(len, version.split(".")))):
+                card = base_card()
+                card["version"] = version
+                self.assert_card_diagnostic_without_traceback(card, "ROOT.VERSION")
+        self.assertEqual(
+            validate_cards.CardLinter._parse_version("123456789.987654321"),
+            (123456789, 987654321),
+        )
+
+    def test_regex_repetition_overflow_reports_diagnostic(self):
+        card = base_card()
+        field = input_text()
+        field["regex"] = "a{9999999999999999999999999}"
+        card["body"].append(field)
+        card["actions"] = [submit_action()]
+        self.assert_card_diagnostic_without_traceback(card, "INPUT.REGEX")
+
+    def test_regex_recursion_failure_reports_diagnostic(self):
+        card = base_card()
+        field = input_text()
+        field["regex"] = "(" * 1000 + "a" + ")" * 1000
+        card["body"].append(field)
+        card["actions"] = [submit_action()]
+        self.assert_card_diagnostic_without_traceback(card, "INPUT.REGEX")
 
     def test_versions_below_1_5_report_explicit_policy_minimum(self):
         for profile in validate_cards.PROFILES:
@@ -477,6 +532,15 @@ class CardLinterTests(unittest.TestCase):
         ]
         result = self.lint(card)
         self.assertIn("OPENURL.HTTPS", self.codes(result))
+
+    def test_malformed_open_url_reports_diagnostic(self):
+        for url in ("https://[::1", "https://[invalid]", "https://example.com\uff1a443"):
+            with self.subTest(url=url):
+                card = base_card()
+                card["actions"] = [
+                    {"type": "Action.OpenUrl", "title": "View documentation", "url": url}
+                ]
+                self.assert_card_diagnostic_without_traceback(card, "OPENURL.HTTPS")
 
     def test_secret_input_identifier_variants_are_rejected(self):
         for input_id in (

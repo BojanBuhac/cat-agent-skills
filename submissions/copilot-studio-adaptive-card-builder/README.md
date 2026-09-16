@@ -75,7 +75,7 @@ python scripts/validate_cards.py card.json --profile teams-1.5 --mode interactiv
 
 Machine-readable output is available with `--format json`. Add `--warnings-as-errors` for a stricter quality gate: warnings then produce `FAIL` in text, `ok: false` in JSON results, and a nonzero exit code. Diagnostics retain their original warning severity.
 
-Run the 75 regression tests and strict template lint from the same skill directory:
+Run the 79 regression tests and strict template lint from the same skill directory:
 
 ```shell
 python -B -m unittest discover -s scripts/tests -p "test_*.py"
