@@ -34,6 +34,10 @@ def set_oauth_reference(
         or not oauth_configuration_id.strip()
     ):
         raise CoworkPluginError("OAuth configuration ID must be non-empty text.")
+    if oauth_configuration_id != oauth_configuration_id.strip():
+        raise CoworkPluginError(
+            "OAuth configuration ID must not have surrounding whitespace."
+        )
     if len(oauth_configuration_id) > 128:
         raise CoworkPluginError(
             "OAuth configuration ID must not exceed 128 characters."

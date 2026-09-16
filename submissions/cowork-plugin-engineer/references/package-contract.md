@@ -31,12 +31,13 @@ with a 5 MB per-file safety limit during local validation.
 
 ## Manifest invariants
 
-- `$schema` and `manifestVersion` identify the same supported schema:
-  `v1.28`/`1.28` or `vDevPreview`/`devPreview`.
+- `$schema` is the canonical Microsoft HTTPS schema URL for the supported
+  `v1.28`/`1.28` or `vDevPreview`/`devPreview` manifest version.
 - `id` is a stable GUID and does not change across releases.
 - `version` is a three-part semantic version and increases for each update.
 - Developer website, privacy, and terms URLs use HTTPS. Prefer the same domain.
-- Short and full names and descriptions satisfy schema length limits.
+- Short name is at most 30 characters, full name at most 100, short
+  description at most 80, and full description at most 4000.
 - `color.png` is 192x192.
 - Both icons must decode successfully. The local decoder supports
   non-interlaced PNGs only; re-export interlaced icons without interlacing
@@ -82,7 +83,8 @@ with a 5 MB per-file safety limit during local validation.
   meta-validation or proof that inputs will work against the server.
 - `None` has no `referenceId`.
 - `OAuthPluginVault` has the generated OAuth client registration ID, never a
-  human-readable placeholder, and the ID does not exceed 128 characters.
+  human-readable placeholder or surrounding whitespace, and the ID does not
+  exceed 128 characters.
 - Cowork-managed Dynamic Client Registration can omit `authorization`.
   An explicit schema-valid `DynamicClientRegistration` object instead requires
   a non-placeholder `referenceId`.

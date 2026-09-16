@@ -44,7 +44,9 @@ MCP_TEMPLATE_SENTINELS = {
     "replace tool title",
 }
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-SEMVER_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+SEMVER_PATTERN = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$"
+)
 GUID_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -159,6 +161,20 @@ def required_text(obj: Any, name: str, label: str) -> str:
     value = get_property(obj, name)
     if not isinstance(value, str) or not value.strip():
         raise CoworkPluginError(f"{label} is required.")
+    return value
+
+
+def bounded_text(
+    obj: Any,
+    name: str,
+    label: str,
+    max_length: int,
+) -> str:
+    value = required_text(obj, name, label)
+    if len(value) > max_length:
+        raise CoworkPluginError(
+            f"{label} must not exceed {max_length} characters."
+        )
     return value
 
 
@@ -954,6 +970,11 @@ def _validate_connector_authorization(
         raise CoworkPluginError(
             f"Connector '{connector_id}' referenceId must be text."
         )
+    if isinstance(reference_id, str) and reference_id != reference_id.strip():
+        raise CoworkPluginError(
+            f"Connector '{connector_id}' referenceId must not have "
+            "surrounding whitespace."
+        )
     reference_id = reference_id or ""
     if auth_type == "None":
         if has_reference_id:
@@ -1038,10 +1059,14 @@ def validate_project(
         )
     schema = required_text(manifest, "$schema", "$schema")
     schema_segment = str(version_policy["schema_segment"])
-    if f"/{schema_segment}/" not in urlparse(schema).path:
+    expected_schema = (
+        "https://developer.microsoft.com/json-schemas/teams/"
+        f"{schema_segment}/MicrosoftTeams.schema.json"
+    )
+    if schema != expected_schema:
         raise CoworkPluginError(
-            f"$schema and manifestVersion do not match: {schema} / "
-            f"{manifest_version}"
+            f"$schema must be the canonical schema for manifestVersion "
+            f"{manifest_version}: {expected_schema}"
         )
     version = required_text(manifest, "version", "version")
     if not SEMVER_PATTERN.fullmatch(version):
@@ -1063,13 +1088,13 @@ def validate_project(
         raise CoworkPluginError(f"id must be a non-empty GUID: {manifest_id}")
 
     name = as_object(get_property(manifest, "name"), "name")
-    required_text(name, "short", "name.short")
-    required_text(name, "full", "name.full")
+    bounded_text(name, "short", "name.short", 30)
+    bounded_text(name, "full", "name.full", 100)
     description = as_object(
         get_property(manifest, "description"), "description"
     )
-    required_text(description, "short", "description.short")
-    required_text(description, "full", "description.full")
+    bounded_text(description, "short", "description.short", 80)
+    bounded_text(description, "full", "description.full", 4000)
 
     developer = as_object(get_property(manifest, "developer"), "developer")
     required_text(developer, "name", "developer.name")

@@ -45,6 +45,16 @@ def create_project(
     for value, label in required_text:
         if not value.strip():
             raise CoworkPluginError(f"{label} must not be empty.")
+    for value, label, maximum in (
+        (plugin_name, "Plugin name", 30),
+        (short_description, "Short description", 80),
+        (full_description, "Full description", 4000),
+        (developer_name, "Developer name", 32),
+    ):
+        if len(value) > maximum:
+            raise CoworkPluginError(
+                f"{label} must not exceed {maximum} characters."
+            )
     if len(skill_names) != len(skill_descriptions):
         raise CoworkPluginError(
             "Skill names and skill descriptions must have the same number "
