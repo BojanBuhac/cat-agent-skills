@@ -252,6 +252,7 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
     require(isinstance(documents, list) and bool(documents), "documents must contain at least one document")
     document_ids: set[str] = set()
     document_page_counts: dict[str, int] = {}
+    document_page_numbers: dict[str, set[int]] = {}
     page_lookup: dict[tuple[str, int], str] = {}
     referenced_paths: set[str] = set()
     page_count = 0
@@ -301,7 +302,9 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
             page_lookup[(document_id, number)] = image
             referenced_paths.add(image)
             page_count += 1
+        document_page_numbers[document_id] = numbers
 
+    requested_pages: dict[str, set[int]] = {document_id: set() for document_id in document_ids}
     for range_index, page_range in enumerate(request["pageRanges"]):
         field = f"request.pageRanges[{range_index}]"
         range_keys = {"documentId", "from", "to"}
@@ -316,6 +319,20 @@ def validate_manifest_data(manifest: Any, output_dir: Path | None = None) -> dic
         require(start <= end, f"{field}.from must be less than or equal to to")
         require(end <= document_page_counts[document_id],
                 f"{field}.to exceeds the declared page count")
+        requested_pages[document_id].update(range(start, end + 1))
+    if request["pageRanges"]:
+        for document_id, selected_pages in requested_pages.items():
+            missing_pages = selected_pages - document_page_numbers[document_id]
+            require(not missing_pages,
+                    f"Document {document_id} is missing requested page records: "
+                    + ", ".join(str(number) for number in sorted(missing_pages)))
+    else:
+        for document_id, declared_page_count in document_page_counts.items():
+            expected_pages = set(range(1, declared_page_count + 1))
+            missing_pages = expected_pages - document_page_numbers[document_id]
+            require(not missing_pages,
+                    f"Document {document_id} is missing page records: "
+                    + ", ".join(str(number) for number in sorted(missing_pages)))
 
     assets = manifest["assets"]
     require(isinstance(assets, list), "assets must be an array")
@@ -900,7 +917,9 @@ def command_package(args: argparse.Namespace) -> None:
     write_json(manifest_path, manifest)
     counts = validate_manifest_data(manifest, output_dir)
     write_validation_report(output_dir, manifest_path, counts)
-    archive = Path(args.archive).resolve()
+    archive_argument = Path(args.archive)
+    require(not archive_argument.is_symlink(), "Archive path cannot be a symlink")
+    archive = archive_argument.resolve()
     require(not archive.is_relative_to(output_dir), "Archive must be outside the output directory")
     required_files = {
         "manifest.json",
@@ -1067,6 +1086,19 @@ def command_self_test(_: argparse.Namespace) -> None:
         ]
         validate_manifest_data(bounded_manifest)
         expect_manifest_error(
+            "incomplete full-document page coverage",
+            lambda value: value["documents"][0].update({"pageCount": 2})
+        )
+        expect_manifest_error(
+            "missing requested page record",
+            lambda value: (
+                value["documents"][0].update({"pageCount": 2}),
+                value["request"].update({"pageRanges": [
+                    {"documentId": "test-document", "from": 1, "to": 2}
+                ]})
+            )
+        )
+        expect_manifest_error(
             "boolean occurrence page number",
             lambda value: value["assets"][0]["occurrences"][0].update({"pageNumber": True})
         )
@@ -1153,6 +1185,21 @@ def command_self_test(_: argparse.Namespace) -> None:
             )),
             "archive inside the output directory"
         )
+        archive_target = temporary_path / "archive-target.zip"
+        archive_symlink = temporary_path / "archive-link.zip"
+        try:
+            archive_symlink.symlink_to(archive_target)
+        except OSError:
+            pass
+        else:
+            expect_validation_error(
+                lambda: command_package(argparse.Namespace(
+                    output_dir=str(root), manifest=str(manifest_path),
+                    archive=str(archive_symlink)
+                )),
+                "archive symlink"
+            )
+            require(not archive_target.exists(), "Self-test archive symlink target was created")
         archive = temporary_path / "self-test.zip"
         command_package(argparse.Namespace(
             output_dir=str(root), manifest=str(manifest_path), archive=str(archive)
