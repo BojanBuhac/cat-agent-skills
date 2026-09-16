@@ -775,23 +775,23 @@ def analyze(data, args, as_of):
 # --------------------------------------------------------------------------- rendering
 
 CSS = """
-:root{--bg:#f3f4f6;--card:#fff;--ink:#111827;--muted:#6b7280;--line:#e5e7eb;--brand:#0f6cbd;--brand2:#5b5fc7;--ok:#107c10;--warn:#c19c00;--bad:#c50f1f;--chip:#eef2ff}
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
-header{background:linear-gradient(120deg,var(--brand),var(--brand2));color:#fff;padding:28px 40px}header h1{margin:0 0 4px;font-size:26px;font-weight:600}header p{margin:0;opacity:.9}
-main{max-width:1280px;margin:0 auto;padding:24px 40px 60px}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin:-46px 0 22px}
-.kpi{background:var(--card);border-radius:12px;padding:16px 18px;box-shadow:0 2px 8px rgba(0,0,0,.06)}.kpi .l{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.kpi .v{font-size:26px;font-weight:600;margin-top:4px}.kpi .s{color:var(--muted);font-size:12px;margin-top:2px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:18px}
-.card{background:var(--card);border-radius:12px;padding:18px 20px;box-shadow:0 2px 8px rgba(0,0,0,.05)}.card h2{margin:0 0 12px;font-size:16px;font-weight:600}.card h2 small{color:var(--muted);font-weight:400;margin-left:8px}
-.bar{display:grid;grid-template-columns:200px 1fr 90px;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)}.bar:last-child{border-bottom:0}.bar .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bar .t{height:14px;background:#eef2f7;border-radius:7px;overflow:hidden}.bar .f{height:100%;background:var(--brand);border-radius:7px}.bar .f.warn{background:var(--warn)}.bar .f.bad{background:var(--bad)}.bar .f.ok{background:var(--ok)}.bar .val{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
-table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px 8px;text-align:left;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}th:hover{color:var(--brand)}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
-.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;background:var(--chip);color:var(--brand2)}.pill.High{background:#fde7e9;color:var(--bad)}.pill.Medium{background:#fff4ce;color:#8a6d00}.pill.Low{background:#dff6dd;color:var(--ok)}
-.rec{border-left:4px solid var(--brand);padding:10px 14px;margin:10px 0;background:#fafbfd;border-radius:0 8px 8px 0}.rec.High{border-color:var(--bad)}.rec.Medium{border-color:var(--warn)}.rec.Low{border-color:var(--ok)}.rec b{display:block;margin-bottom:4px}.rec .ev{color:var(--muted);font-size:13px}.rec .ac{margin-top:6px}
-.tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}.tabs button{border:1px solid var(--line);background:#fff;padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit}.tabs button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
-.hide{display:none}.search{padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;width:260px;margin-bottom:8px}
-.note{color:var(--muted);font-size:12px}.foot{margin-top:28px;color:var(--muted);font-size:12px;line-height:1.6}
-.ring{display:flex;align-items:center;gap:18px}.legend span{display:inline-block;margin-right:14px}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
-@media print{header{-webkit-print-color-adjust:exact}.tabs,.search{display:none}.hide{display:block!important}}
+:root{--b:#0f6cbd;--bg:#f5f6f8;--card:#fff;--t:#1b1b1f;--m:#616161;--line:#e5e7eb;--ok:#107c10;--warn:#835b00;--bad:#a80000;--teal:#0b8a8a;--orange:#f7a600;--purple:#7a3e9d;--red:#c43e1c}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif;color:var(--t);background:var(--bg)}
+header{background:linear-gradient(120deg,#0f3d6e,#0f6cbd);color:#fff;padding:28px 32px}header h1{margin:0 0 6px;font-size:24px}header p{margin:0;opacity:.9}
+nav{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:8px 32px;display:flex;gap:18px;flex-wrap:wrap;z-index:5}nav a{color:var(--b);text-decoration:none;font-weight:600}
+main{padding:24px 32px;max-width:1400px;margin:auto}section{margin-bottom:34px}h2{font-size:19px;margin:0 0 12px;border-left:4px solid var(--b);padding-left:10px}h4{margin:0 0 6px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}.kpi .k,.kpi .l{color:var(--m);font-size:12px;text-transform:uppercase;letter-spacing:.4px}.kpi .v{font-size:26px;font-weight:700;margin:4px 0}.kpi .s{color:var(--m);font-size:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}.grid2>*{min-width:0}.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.stack{display:flex;flex-direction:column;gap:10px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}.bar-row{grid-template-columns:1fr}.bar-val{text-align:left}}
+table{width:100%;border-collapse:collapse;background:var(--card);font-size:13px}th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}th{background:#eef3f9;cursor:pointer;position:sticky;top:42px;user-select:none}th:hover,th:focus{background:#dfe8f3;outline:2px solid transparent}tbody tr:hover{background:#f8fafc}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tw{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:620px;max-width:100%}.tw table{border:0}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#eee}.pill.ok,.pill.Low{background:#dff6dd;color:var(--ok)}.pill.warn,.pill.Medium{background:#fff4ce;color:var(--warn)}.pill.bad,.pill.High{background:#fde7e9;color:var(--bad)}.pill.muted-b{background:#eee;color:#555}
+.bars{display:flex;flex-direction:column;gap:6px}.bar-row{display:grid;grid-template-columns:200px 1fr 170px;align-items:center;gap:8px}.bar-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bar-track{background:#eef0f3;border-radius:4px;height:16px}.bar-fill{height:16px;border-radius:4px;background:var(--b)}.bar-fill.warn{background:var(--orange)}.bar-fill.bad{background:var(--bad)}.bar-fill.ok{background:var(--ok)}.bar-val{font-variant-numeric:tabular-nums}
+.muted,.note{color:var(--m);font-size:12px}.ring{display:flex;align-items:center;gap:20px}.legend{display:flex;flex-direction:column;gap:6px}.legend span{display:block}.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.rec{display:flex;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px}.rec-n{flex:0 0 30px;height:30px;border-radius:50%;background:var(--b);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}.rec p{margin:4px 0}.rec h4{font-size:14px}
+.tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}.tabs button{border:1px solid var(--line);background:#fff;padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit}.tabs button.on{background:var(--b);color:#fff;border-color:var(--b)}.hide{display:none}.search,.filter{padding:6px 10px;border:1px solid var(--line);border-radius:6px;margin-bottom:8px;width:min(320px,100%)}
+footer,.foot{color:var(--m);font-size:12px;padding:20px 32px;border-top:1px solid var(--line)}
+@media print{nav,.tabs,.search,.filter{display:none}.tw{max-height:none;overflow:visible}th{position:static}body{background:#fff}}
 """
 
 JS = r"""
@@ -820,9 +820,9 @@ def bar_rows(items, key, label, total=None, color=None, valfmt=None, limit_key=N
         w = min(100, v / mx * 100)
         cls = color(i) if color else ""
         val = valfmt(i) if valfmt else (f"{fmt(v)}" + (f" ({fmt(v/total*100,1)}%)" if total else ""))
-        out.append(f'<div class="bar"><div class="n" title="{html.escape(str(i[label]))}">{html.escape(str(i[label]))}</div>'
-                   f'<div class="t"><div class="f {cls}" style="width:{w:.1f}%"></div></div><div class="val">{val}</div></div>')
-    return "".join(out)
+        out.append(f'<div class="bar-row"><div class="bar-label" title="{html.escape(str(i[label]))}">{html.escape(str(i[label]))}</div>'
+                   f'<div class="bar-track"><div class="bar-fill {cls}" style="width:{w:.1f}%"></div></div><div class="bar-val">{val}</div></div>')
+    return f'<div class="bars">{"".join(out)}</div>'
 
 
 def donut(parts, size=120):
@@ -855,14 +855,15 @@ def render_html(res, anonymize=False):
     fc_sub = (f"{f['daysElapsed']}/{f['daysInPeriod']} days elapsed" if f["mode"] == "monthly"
               else f"~{money(f.get('annualisedCost'), cur)}/yr at {res['meta']['paygRateBasis']}")
     kpis = [
-        ("Copilot Credits used", fmt(h["totalCredits"]), f"{fmt(h['prepaidShare'],1)}% prepaid" if h["prepaidShare"] is not None else "prepaid / PAYG split not provided"),
+        ("Credits used", fmt(h["totalCredits"]), f"{h.get('firstActivity') or f.get('periodStart')} to {h.get('lastActivity') or f.get('periodEnd')}"),
+        ("Prepaid share", f"{fmt(h['prepaidShare'],0)}%" if h["prepaidShare"] is not None else "-", f"{fmt(h['prepaidCredits'])} prepaid; {fmt(h['paygCredits'])} pay-as-you-go" if h["prepaidShare"] is not None else "prepaid / PAYG split not provided"),
         ("Est. cost", money(h["estimatedCost"], cur), (f"list {money(h['listCost'], cur)} @ {rate}/credit" if h["splitAvailable"] else f"{res['meta']['paygRateBasis']} @ {rate}/credit - no split")),
         (fc_label, fmt(fc_val), fc_sub),
         ("Active users", fmt(h["activeUsers"]), f"median {fmt(h['medianCreditsPerUser'])} credits/user" if res["users"]["count"] else h["activeUsersBasis"]),
         ("Credits / active user", fmt(h["creditsPerActiveUser"]), "mean across consuming users"),
         ("Credits / task", fmt(h["creditsPerTask"]), f"over {fmt(h['matchedTasks'])} matched tasks ({fmt(h['totalTasks'])} total, {fmt(h['scheduledTaskShare'],1)}% scheduled)" if h["totalTasks"] else "Cowork usage export not provided"),
     ]
-    kpi_html = "".join(f'<div class="kpi"><div class="l">{l}</div><div class="v">{v}</div><div class="s">{s}</div></div>' for l, v, s in kpis)
+    kpi_html = "".join(f'<div class="kpi"><div class="k">{html.escape(str(l))}</div><div class="v">{html.escape(str(v))}</div><div class="s">{html.escape(str(s))}</div></div>' for l, v, s in kpis)
 
     # Services
     svc = res["services"]
@@ -878,7 +879,7 @@ def render_html(res, anonymize=False):
         else:
             split_html = "<p class='note'>Prepaid vs pay-as-you-go split unavailable or inconsistent; costs fall back to the configured PAYG rate.</p>"
         svc_html = f"""{split_html}
-        <table><thead><tr><th onclick="sortTable(this)">Service</th><th class="num" onclick="sortTable(this)">Active users</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Prepaid</th><th class="num" onclick="sortTable(this)">PAYG</th><th class="num" onclick="sortTable(this)">PAYG list cost</th><th>Last activity</th></tr></thead><tbody>{svc_rows}</tbody></table>"""
+        <div class="tw" style="border:0;margin-top:12px"><table><thead><tr><th onclick="sortTable(this)">Service</th><th class="num" onclick="sortTable(this)">Active users</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Prepaid</th><th class="num" onclick="sortTable(this)">PAYG</th><th class="num" onclick="sortTable(this)">PAYG cost</th><th>Last activity</th></tr></thead><tbody>{svc_rows}</tbody></table></div>"""
     else:
         svc_html = "<p class='note'>Agents & services export not provided - service split unavailable.</p>"
 
@@ -898,7 +899,7 @@ def render_html(res, anonymize=False):
         idle_labels = html.escape(', '.join(P['idle']) or 'none')
         pol_html = f"""<p class="note">{P['unlimitedCount']} active policies without a limit carry {fmt(P['unlimitedShare'],1)}% of active policy-attributed credits. Near limit: {near_labels}. Idle: {idle_labels}.</p>
         {bar_rows(sorted(P['rows'], key=lambda p: -p['used']), 'used', 'name', total=P['total'] or None, color=pcolor)}
-        <table style="margin-top:12px"><thead><tr><th onclick="sortTable(this)">Policy</th><th onclick="sortTable(this)">Applies to</th><th class="num" onclick="sortTable(this)">Active users</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Limit / month</th><th class="num" onclick="sortTable(this)">Used</th><th onclick="sortTable(this)">Billing</th><th onclick="sortTable(this)">Status</th></tr></thead><tbody>{prow}</tbody></table>"""
+        <div class="tw" style="margin-top:12px"><table><thead><tr><th onclick="sortTable(this)">Policy</th><th onclick="sortTable(this)">Applies to</th><th class="num" onclick="sortTable(this)">Active users</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Limit / month</th><th class="num" onclick="sortTable(this)">Used</th><th onclick="sortTable(this)">Billing</th><th onclick="sortTable(this)">Status</th></tr></thead><tbody>{prow}</tbody></table></div>"""
     else:
         pol_html = "<p class='note'>Spending policies export not provided.</p>"
 
@@ -909,7 +910,7 @@ def render_html(res, anonymize=False):
                        f"<td class='num' data-v='{g['activationRate'] or 0}'>{'-' if g['activationRate'] is None else fmt(g['activationRate'],0)+'%'}</td><td class='num'>{fmt(g['used'])}</td><td class='num'>{fmt(g['avgPerUserPerDay'],0)}</td><td class='num'>{fmt(g['sessions'])}</td><td>{g['lastActivity'] or '-'}</td></tr>" for g in G["rows"])
         grp_html = f"""<p class="note">Users can belong to several groups, so group totals overlap ({fmt(G['sumOfGroups'])} summed vs {fmt(h['totalCredits'])} actual). Activation = members that used credits / total members.</p>
         {bar_rows(G['rows'][:8], 'used', 'name')}
-        <table style="margin-top:12px"><thead><tr><th onclick="sortTable(this)">Group</th><th class="num" onclick="sortTable(this)">Members</th><th class="num" onclick="sortTable(this)">Members used</th><th class="num" onclick="sortTable(this)">Activation</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Avg/user/day</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Last activity</th></tr></thead><tbody>{grow}</tbody></table>"""
+        <div class="tw" style="margin-top:12px"><table><thead><tr><th onclick="sortTable(this)">Group</th><th class="num" onclick="sortTable(this)">Members</th><th class="num" onclick="sortTable(this)">Members used</th><th class="num" onclick="sortTable(this)">Activation</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Avg/user/day</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Last activity</th></tr></thead><tbody>{grow}</tbody></table></div>"""
     else:
         grp_html = "<p class='note'>Groups export not provided.</p>"
 
@@ -933,7 +934,7 @@ def render_html(res, anonymize=False):
     <div class="tabs"><button class="on" onclick="tab(this,'u-top')">Top consumers</button><button onclick="tab(this,'u-tiers')">Limit tiers</button><button onclick="tab(this,'u-all')">All users</button></div>
     <div id="u-top" class="pane">{top_html}</div>
     <div id="u-tiers" class="pane hide"><table><thead><tr><th class="num">Monthly limit</th><th class="num">Users</th><th class="num">Credits</th><th class="num">Avg per user</th><th class="num">Avg % of limit</th></tr></thead><tbody>{tier_rows}</tbody></table></div>
-    <div id="u-all" class="pane hide"><input class="search" placeholder="Filter users..." oninput="filterTable(this,'utab')"><table id="utab"><thead><tr><th onclick="sortTable(this)">User</th><th onclick="sortTable(this)">UPN</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Limit</th><th class="num" onclick="sortTable(this)">% used</th><th class="num" onclick="sortTable(this)">Tasks</th><th class="num" onclick="sortTable(this)">Credits/task</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Licence</th><th onclick="sortTable(this)">Last activity</th><th onclick="sortTable(this)">Department</th><th onclick="sortTable(this)">Manager</th></tr></thead><tbody>{urows}</tbody></table></div>"""
+    <div id="u-all" class="pane hide"><input class="search" placeholder="Filter users..." oninput="filterTable(this,'utab')"><div class="tw"><table id="utab"><thead><tr><th onclick="sortTable(this)">User</th><th onclick="sortTable(this)">UPN</th><th class="num" onclick="sortTable(this)">Credits</th><th class="num" onclick="sortTable(this)">Limit</th><th class="num" onclick="sortTable(this)">% used</th><th class="num" onclick="sortTable(this)">Tasks</th><th class="num" onclick="sortTable(this)">Credits/task</th><th class="num" onclick="sortTable(this)">Sessions</th><th onclick="sortTable(this)">Licence</th><th onclick="sortTable(this)">Last activity</th><th onclick="sortTable(this)">Department</th><th onclick="sortTable(this)">Manager</th></tr></thead><tbody>{urows}</tbody></table></div></div>"""
 
     # Departments & managers
     O = res["org"]
@@ -943,9 +944,9 @@ def render_html(res, anonymize=False):
             f"<tr><td>{html.escape(r['name'])}</td><td class='num'>{r['users']}</td><td class='num'>{r['consuming']}</td><td class='num'>{fmt(r['used'])}</td>"
             f"<td class='num' data-v='{r['share']}'>{fmt(r['share'],1)}%</td><td class='num'>{fmt(r['avgPerUser'])}</td><td class='num'>{fmt(r['tasks']) if r['tasks'] else '-'}</td>"
             f"<td class='num'>{fmt(r['creditsPerTask'])}</td><td class='num'>{r['nearOrOver']}</td><td>{html.escape(r['topUser'])}</td></tr>" for r in rows)
-        return (f"<table><thead><tr><th onclick=\"sortTable(this)\">{first_label}</th><th class='num' onclick=\"sortTable(this)\">Users</th><th class='num' onclick=\"sortTable(this)\">Consuming</th>"
+        return (f"<div class=\"tw\"><table><thead><tr><th onclick=\"sortTable(this)\">{first_label}</th><th class='num' onclick=\"sortTable(this)\">Users</th><th class='num' onclick=\"sortTable(this)\">Consuming</th>"
                 f"<th class='num' onclick=\"sortTable(this)\">Credits</th><th class='num' onclick=\"sortTable(this)\">Share</th><th class='num' onclick=\"sortTable(this)\">Avg / user</th><th class='num' onclick=\"sortTable(this)\">Tasks</th>"
-                f"<th class='num' onclick=\"sortTable(this)\">Credits / task</th><th class='num' onclick=\"sortTable(this)\">&ge;{near_pct}% of limit</th><th onclick=\"sortTable(this)\">Top user</th></tr></thead><tbody>{tr}</tbody></table>")
+            f"<th class='num' onclick=\"sortTable(this)\">Credits / task</th><th class='num' onclick=\"sortTable(this)\">&ge;{near_pct}% of limit</th><th onclick=\"sortTable(this)\">Top user</th></tr></thead><tbody>{tr}</tbody></table></div>")
 
     if O["provided"]:
         def dcolor(r):
@@ -960,17 +961,19 @@ def render_html(res, anonymize=False):
         <div style="margin-top:12px">{org_table(mgr_rows, 'Manager')}</div>"""
         country_html = ""
         if O["countries"]:
-            country_html = f"""<div class="card" style="grid-column:1/-1"><h2>Countries <small>usage location</small></h2>{bar_rows(O['countries'][:12], 'used', 'name', total=res['users']['total'] or None)}</div>"""
-        org_cards = (f'<div class="card" style="grid-column:1/-1"><h2>Departments <small>who is spending</small></h2>{dept_html}</div>'
-                     f'<div class="card" style="grid-column:1/-1"><h2>Managers <small>accountability view</small></h2>{mgr_html}</div>{country_html}')
+            country_html = f"""<div class="card" style="margin-top:16px"><h4>Countries <span class="muted">usage location</span></h4>{bar_rows(O['countries'][:12], 'used', 'name', total=res['users']['total'] or None)}</div>"""
+        org_cards = (f'<div class="grid2"><div class="card"><h4>Credits by department</h4>{dept_html}</div>'
+                     f'<div class="card"><h4>Credits by manager</h4>{mgr_html}</div></div>{country_html}')
     else:
-        org_cards = ('<div class="card" style="grid-column:1/-1"><h2>Departments &amp; managers</h2><p class="note">No directory data was supplied. '
+        org_cards = ('<div class="card"><p class="note">No directory data was supplied. '
                      'Provide Microsoft Graph user data (<code>/users?$select=department,jobTitle,usageLocation&amp;$expand=manager</code>) or an Entra user export with '
                      '<code>--org</code> to add per-department and per-manager reporting.</p></div>')
 
     # Recommendations
-    rec_html = "".join(f'<div class="rec {r["priority"]}"><b><span class="pill {r["priority"]}">{r["priority"]}</span> {html.escape(r["title"])}</b>'
-                       f'<div class="ev">Evidence: {html.escape(r["evidence"])}</div><div class="ac">{html.escape(r["action"])}</div></div>' for r in res["recommendations"]) or "<p class='note'>No recommendations triggered.</p>"
+    rec_html = "".join(f'<div class="rec"><div class="rec-n">{i}</div><div><h4>{html.escape(r["title"])}</h4>'
+                       f'<p><b>Priority:</b> <span class="pill {r["priority"]}">{r["priority"]}</span></p>'
+                       f'<p><b>Evidence:</b> {html.escape(r["evidence"])}</p><p><b>Action:</b> {html.escape(r["action"])}</p></div></div>'
+                       for i, r in enumerate(res["recommendations"], 1)) or "<p class='muted'>No recommendations triggered.</p>"
 
     # Forecast card
     if f["mode"] == "monthly":
@@ -986,24 +989,23 @@ def render_html(res, anonymize=False):
     dq = "".join(f"<li>{html.escape(n)}</li>" for n in res["dataQuality"])
     inputs = "".join(f"<li>{html.escape(k)}: {html.escape(os.path.basename(v))}</li>" for k, v in res["meta"]["inputs"].items())
 
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(res['meta']['title'])}</title><style>{CSS}</style></head><body>
-<header><h1>{html.escape(res['meta']['title'])}</h1><p>Cowork &amp; Work IQ consumption &middot; as of {res['meta']['asOf']} &middot; source: Microsoft 365 admin center exports &middot; reporting only</p></header>
+    headline_note = (f"Run-rates are straight-line on observed data and assume no policy changes. Costs use {html.escape(res['meta']['paygRateBasis'])} of {cur} {rate}/pay-as-you-go credit and {html.escape(res['meta']['prepaidRateBasis'])} of {cur} {res['meta']['prepaidRate']}/prepaid credit. The Microsoft invoice on the Azure subscription named in the billing method is the record of truth.")
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{html.escape(res['meta']['title'])}</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>{CSS}</style></head><body>
+<header><h1>{html.escape(res['meta']['title'])}</h1><p>Copilot Credits consumption report &middot; data as of {res['meta']['asOf']} &middot; source: Microsoft 365 admin center exports &middot; reporting only</p></header>
+<nav><a href="#headline">Headline</a><a href="#services">Services</a><a href="#policies">Spending policies</a><a href="#org">Departments &amp; managers</a><a href="#groups">Groups</a><a href="#users">Users</a><a href="#recs">Recommendations</a><a href="#dq">Data quality</a></nav>
 <main>
-<div class="kpis">{kpi_html}</div>
-<div class="grid">
-<div class="card" style="grid-column:1/-1"><h2>Recommendations <small>evidence-backed, sorted by priority</small></h2>{rec_html}</div>
-<div class="card"><h2>Service breakdown <small>prepaid vs pay-as-you-go</small></h2>{svc_html}</div>
-<div class="card"><h2>Forecast &amp; run-rate</h2>{fc_html}</div>
-<div class="card" style="grid-column:1/-1"><h2>Spending-limit analysis <small>policies</small></h2>{pol_html}</div>
-{org_cards}
-<div class="card" style="grid-column:1/-1"><h2>Groups</h2>{grp_html}</div>
-<div class="card" style="grid-column:1/-1"><h2>Users</h2>{users_html}</div>
-<div class="card" style="grid-column:1/-1"><h2>Data quality &amp; caveats</h2><ul>{dq}<li>Exports are point-in-time snapshots; the live dashboard refreshes every 2 hours and may differ.</li><li>Usage above a per-user soft limit completes the task, is not billed, and is not shown as consumed credits.</li><li>The Microsoft invoice (Azure subscription named in the billing method) is the record of truth; costs here use {html.escape(res['meta']['paygRateBasis'])} {cur} {rate}/credit for pay-as-you-go and {html.escape(res['meta']['prepaidRateBasis'])} {cur} {res['meta']['prepaidRate']}/credit for prepaid.</li></ul>
-<p class="note">Inputs:</p><ul class="note">{inputs}</ul></div>
-</div>
-<div class="foot">Generated by the Cowork &amp; Work IQ Consumption Advisor skill. Self-contained file - no external scripts, safe to email or store in SharePoint.</div>
-</main><script>{JS}</script></body></html>"""
+<section id="headline"><h2>Headline</h2><div class="kpis">{kpi_html}</div><p class="muted" style="margin-top:10px">{headline_note}</p></section>
+<section id="services"><h2>Service breakdown</h2><div class="grid2"><div class="card"><h4>Prepaid vs pay-as-you-go</h4>{svc_html}</div><div class="card"><h4>Forecast &amp; run-rate</h4>{fc_html}</div></div></section>
+<section id="policies"><h2>Spending-limit analysis</h2><div class="card">{pol_html}</div></section>
+<section id="org"><h2>Departments &amp; managers</h2>{org_cards}</section>
+<section id="groups"><h2>Groups</h2><div class="card">{grp_html}</div></section>
+<section id="users"><h2>Users</h2><div class="card">{users_html}</div></section>
+<section id="recs"><h2>Recommendations</h2>{rec_html}<p class="muted">This report only recommends. Policy, limit and billing-method changes are made in Microsoft 365 admin center &gt; Copilot &gt; Cost management.</p></section>
+<section id="dq"><h2>Data quality</h2><div class="card"><ul>{dq}<li>Exports are point-in-time snapshots; the live dashboard refreshes every 2 hours and may differ.</li><li>Usage above a per-user soft limit completes the task, is not billed, and is not shown as consumed credits.</li><li>The Microsoft invoice (Azure subscription named in the billing method) is the record of truth; costs here use {html.escape(res['meta']['paygRateBasis'])} {cur} {rate}/credit for pay-as-you-go and {html.escape(res['meta']['prepaidRateBasis'])} {cur} {res['meta']['prepaidRate']}/credit for prepaid.</li></ul><p class="muted">Inputs:</p><ul class="muted">{inputs}</ul></div></section>
+</main>
+<footer>Generated by the Cowork &amp; Work IQ Consumption Advisor skill. Self-contained file - no external scripts, safe to email or store in SharePoint.</footer>
+<script>{JS}</script></body></html>"""
 
 
 def render_md(res):
