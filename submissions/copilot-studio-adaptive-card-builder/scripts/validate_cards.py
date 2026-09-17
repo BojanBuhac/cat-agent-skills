@@ -19,6 +19,11 @@ from urllib.parse import urlparse
 
 VALIDATOR_NAME = "copilot-studio-adaptive-card-linter"
 VALIDATOR_VERSION = "1.0.0"
+MAX_JSON_DEPTH = 64
+JSON_DEPTH_MESSAGE = (
+    f"Card JSON supports at most {MAX_JSON_DEPTH} nested object/array levels "
+    "(the root object or array counts as one)."
+)
 
 SCHEMA_URLS = {
     "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -215,27 +220,27 @@ ELEMENT_PROPERTIES = {
     "ActionSet": {"type", "actions", "spacing", "separator", "id"},
     "Input.Text": {
         "type", "id", "label", "isRequired", "errorMessage", "placeholder",
-        "value", "maxLength", "isMultiline", "regex", "style",
+        "value", "maxLength", "isMultiline", "regex", "style", "isVisible",
     },
     "Input.Number": {
         "type", "id", "label", "isRequired", "errorMessage", "placeholder",
-        "value", "min", "max",
+        "value", "min", "max", "isVisible",
     },
     "Input.Date": {
         "type", "id", "label", "isRequired", "errorMessage", "placeholder",
-        "value", "min", "max",
+        "value", "min", "max", "isVisible",
     },
     "Input.Time": {
         "type", "id", "label", "isRequired", "errorMessage", "placeholder",
-        "value", "min", "max",
+        "value", "min", "max", "isVisible",
     },
     "Input.Toggle": {
         "type", "id", "label", "title", "isRequired", "errorMessage",
-        "value", "valueOn", "valueOff", "wrap",
+        "value", "valueOn", "valueOff", "wrap", "isVisible",
     },
     "Input.ChoiceSet": {
         "type", "id", "label", "isRequired", "errorMessage", "placeholder",
-        "value", "choices", "style", "isMultiSelect", "wrap",
+        "value", "choices", "style", "isMultiSelect", "wrap", "isVisible",
     },
 }
 
@@ -258,6 +263,46 @@ def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise DuplicateKeyError(f'duplicate JSON property "{key}"')
         result[key] = value
     return result
+
+
+def source_exceeds_depth(source: str) -> bool:
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in source:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+        elif character in "{[":
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                return True
+        elif character in "}]":
+            depth = max(0, depth - 1)
+    return False
+
+
+def value_exceeds_depth(value: Any) -> bool:
+    pending = [(value, 1)]
+    while pending:
+        node, depth = pending.pop()
+        if not isinstance(node, (dict, list)):
+            continue
+        if depth > MAX_JSON_DEPTH:
+            return True
+        children = node.values() if isinstance(node, dict) else node
+        pending.extend(
+            (child, depth + 1)
+            for child in children
+            if isinstance(child, (dict, list))
+        )
+    return False
 
 
 @dataclass(frozen=True)
@@ -329,6 +374,19 @@ class CardLinter:
         target.append(diagnostic)
 
     def lint(self, card: Any, source: str) -> LintResult:
+        if value_exceeds_depth(card):
+            self.error("JSON.DEPTH", "$", JSON_DEPTH_MESSAGE)
+            return self._result(source, self.requested_mode)
+        try:
+            return self._lint_card(card, source)
+        except RecursionError:
+            self.error(
+                "JSON.DEPTH", "$",
+                JSON_DEPTH_MESSAGE + " Runtime recursion capacity was exceeded.",
+            )
+            return self._result(source, self.requested_mode)
+
+    def _lint_card(self, card: Any, source: str) -> LintResult:
         if not isinstance(card, dict):
             self.error("ROOT.TYPE", "$", "The JSON root must be an object.")
             return self._result(source, self.requested_mode)
@@ -661,7 +719,13 @@ class CardLinter:
                 "Every input must have a meaningful label.",
             )
 
-        if element.get("isVisible") is False:
+        if "isVisible" in element and not isinstance(element["isVisible"], bool):
+            self.error(
+                "ELEMENT.BOOLEAN_TYPE",
+                f"{path}.isVisible",
+                '"isVisible" must be boolean.',
+            )
+        elif element.get("isVisible") is False:
             self.error(
                 "ACCESS.HIDDEN_INPUT",
                 f"{path}.isVisible",
@@ -669,7 +733,7 @@ class CardLinter:
             )
 
         is_required = element.get("isRequired")
-        if is_required is not None and not isinstance(is_required, bool):
+        if "isRequired" in element and not isinstance(is_required, bool):
             self.error(
                 "INPUT.REQUIRED_TYPE",
                 f"{path}.isRequired",
@@ -1019,14 +1083,22 @@ class CardLinter:
             return
         try:
             parsed = urlparse(url)
-            valid_https = parsed.scheme.lower() == "https" and bool(parsed.netloc)
+            # Port syntax and range are validated only when this property is read.
+            _ = parsed.port
+            valid_https = (
+                parsed.scheme.lower() == "https"
+                and bool(parsed.netloc)
+                and parsed.username is None
+                and parsed.password is None
+            )
         except ValueError:
             valid_https = False
         if not valid_https:
             self.error(
                 "OPENURL.HTTPS",
                 f"{path}.url",
-                "Action.OpenUrl must use an absolute HTTPS URL.",
+                "Action.OpenUrl must use an absolute HTTPS URL without userinfo "
+                "and with a valid port when specified.",
             )
 
     def _check_feature_versions(
@@ -1087,7 +1159,7 @@ class CardLinter:
                     f"{path}.data",
                     "Action.Submit data must be an object with the package identity contract.",
                 )
-                continue
+                data = {}
             if action.get("associatedInputs") != "none":
                 for key in data:
                     if key in self.input_ids:
@@ -1304,6 +1376,8 @@ def load_card(path: Path) -> tuple[Any | None, Diagnostic | None]:
         )
     except OSError as error:
         return None, Diagnostic("error", "FILE.READ", "$", str(error))
+    if source_exceeds_depth(source):
+        return None, Diagnostic("error", "JSON.DEPTH", "$", JSON_DEPTH_MESSAGE)
     try:
         return (
             json.loads(
@@ -1324,6 +1398,11 @@ def load_card(path: Path) -> tuple[Any | None, Diagnostic | None]:
         )
     except ValueError as error:
         return None, Diagnostic("error", "JSON.CONSTANT", "$", f"{error}.")
+    except RecursionError:
+        return None, Diagnostic(
+            "error", "JSON.DEPTH", "$",
+            JSON_DEPTH_MESSAGE + " Runtime recursion capacity was exceeded.",
+        )
 
 
 def collect_json_files(paths: Iterable[str]) -> list[Path]:

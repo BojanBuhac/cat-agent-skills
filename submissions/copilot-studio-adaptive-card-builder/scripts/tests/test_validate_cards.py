@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT_PATH = Path(__file__).parents[1] / "validate_cards.py"
 SUBMISSION_ROOT = SCRIPT_PATH.parents[1]
@@ -91,9 +92,12 @@ class CardLinterTests(unittest.TestCase):
 
     def assert_card_diagnostic_without_traceback(self, card: dict, code: str):
         self.assertIn(code, self.codes(self.lint(card)))
+        self.assert_source_diagnostic_without_traceback(json.dumps(card), code)
+
+    def assert_source_diagnostic_without_traceback(self, source: str, code: str):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "invalid.json"
-            path.write_text(json.dumps(card), encoding="utf-8")
+            path.write_text(source, encoding="utf-8")
             for output_format in ("text", "json"):
                 with self.subTest(output_format=output_format):
                     process = subprocess.run(
@@ -246,6 +250,116 @@ class CardLinterTests(unittest.TestCase):
             result = validate_cards.lint_path(path, "portable-1.5", "auto")
         self.assertIn("FILE.ENCODING", self.codes(result))
 
+    def test_deep_container_json_reports_depth_diagnostic(self):
+        for depth in (500, 2000, 20000):
+            with self.subTest(depth=depth):
+                card = base_card()
+                card["body"].append("__NESTED__")
+                fragment = (
+                    '{"type":"Container","items":[' * depth
+                    + '{"type":"TextBlock","text":"Nested","wrap":true}'
+                    + "]}" * depth
+                )
+                source = json.dumps(card).replace('"__NESTED__"', fragment)
+                self.assert_source_diagnostic_without_traceback(source, "JSON.DEPTH")
+
+    def test_deep_raw_arrays_report_depth_diagnostic(self):
+        for source in ("[" * 100000, "[" * 2000, "[" * 2000 + "0" + "]" * 2000):
+            with self.subTest(length=len(source)):
+                self.assert_source_diagnostic_without_traceback(source, "JSON.DEPTH")
+
+    def test_in_memory_deep_card_is_rejected_before_recursive_walk(self):
+        card = base_card()
+        nested = {"type": "TextBlock", "text": "Nested", "wrap": True}
+        for _ in range(500):
+            nested = {"type": "Container", "items": [nested]}
+        card["body"].append(nested)
+        with patch.object(validate_cards.CardLinter, "_lint_card") as walk:
+            result = self.lint(card)
+        walk.assert_not_called()
+        self.assertEqual(self.codes(result), {"JSON.DEPTH"})
+
+    def test_depth_preflight_precedes_json_parser(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "deep.json"
+            path.write_text("[" * (validate_cards.MAX_JSON_DEPTH + 1))
+            with patch.object(validate_cards.json, "loads") as parse:
+                card, error = validate_cards.load_card(path)
+            parse.assert_not_called()
+            self.assertIsNone(card)
+            self.assertEqual(error.code, "JSON.DEPTH")
+
+    def test_json_depth_boundary_matches_file_and_object_checks(self):
+        for depth in (63, 64, 65):
+            with self.subTest(depth=depth):
+                card = base_card()
+                action = submit_action()
+                value = "plain"
+                for _ in range(depth - 4):
+                    value = [value]
+                action["data"]["context"] = value
+                card["actions"] = [action]
+                source = json.dumps(card)
+                self.assertEqual(validate_cards.source_exceeds_depth(source), depth > 64)
+                self.assertEqual(validate_cards.value_exceeds_depth(card), depth > 64)
+                result = self.lint(card)
+                if depth > 64:
+                    self.assertEqual(self.codes(result), {"JSON.DEPTH"})
+                    self.assert_source_diagnostic_without_traceback(source, "JSON.DEPTH")
+                else:
+                    self.assertTrue(result.passes(warnings_as_errors=True), result.errors)
+                    with tempfile.TemporaryDirectory() as directory:
+                        path = Path(directory) / "boundary.json"
+                        path.write_text(source)
+                        loaded = validate_cards.lint_path(path, "portable-1.5", "auto")
+                        self.assertTrue(loaded.passes(warnings_as_errors=True), loaded.errors)
+        for depth in (64, 65):
+            with self.subTest(container_walk_depth=depth):
+                card = base_card()
+                action = submit_action()
+                node = {"type": "ActionSet", "actions": [action]}
+                for _ in range(29):
+                    node = {"type": "Container", "items": [node]}
+                card["body"].append(node)
+                if depth == 65:
+                    action["data"]["context"] = {}
+                source = json.dumps(card)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "containers.json"
+                    path.write_text(source)
+                    result = validate_cards.lint_path(path, "portable-1.5", "auto")
+                self.assertEqual(
+                    self.codes(result), {"JSON.DEPTH"} if depth == 65 else set()
+                )
+                self.assertFalse(result.warnings)
+
+    def test_depth_scanner_ignores_brackets_in_escaped_strings(self):
+        card = base_card()
+        card["body"][0]["text"] = 'Quotes " brackets [ { } ] backslash \\" ' * 200
+        source = json.dumps(card)
+        self.assertFalse(validate_cards.source_exceeds_depth(source))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quoted.json"
+            path.write_text(source)
+            result = validate_cards.lint_path(path, "portable-1.5", "auto")
+        self.assertNotIn("JSON.DEPTH", self.codes(result))
+        self.assertNotIn("JSON.SYNTAX", self.codes(result))
+
+    def test_parser_recursion_guard_returns_structured_diagnostic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "card.json"
+            path.write_text(json.dumps(base_card()))
+            with patch.object(validate_cards.json, "loads", side_effect=RecursionError):
+                result = validate_cards.lint_path(path, "portable-1.5", "auto")
+        self.assertEqual(self.codes(result), {"JSON.DEPTH"})
+
+    def test_walker_recursion_guard_returns_structured_diagnostic(self):
+        with patch.object(
+            validate_cards.CardLinter, "_scan_sensitive_values", side_effect=RecursionError
+        ):
+            result = self.lint(base_card())
+        self.assertEqual(self.codes(result), {"JSON.DEPTH"})
+
     def test_version_exceeds_teams_profile(self):
         card = base_card()
         card["version"] = "1.6"
@@ -391,6 +505,57 @@ class CardLinterTests(unittest.TestCase):
         result = self.lint(card)
         self.assertIn("ACCESS.HIDDEN_INPUT", self.codes(result))
 
+    def test_required_property_presence_is_checked_for_every_input_type(self):
+        for element_type in sorted(validate_cards.INPUT_TYPES):
+            for value in (None, "true", 0, [], True, False):
+                with self.subTest(element_type=element_type, isRequired=value):
+                    card = base_card()
+                    field = {"type": element_type, "id": "entry", "label": "Value"}
+                    if element_type == "Input.Toggle":
+                        field["title"] = "Acknowledge details"
+                    elif element_type == "Input.ChoiceSet":
+                        field["choices"] = [{"title": "One", "value": "one"}]
+                    field["isRequired"] = value
+                    card["body"].append(field)
+                    card["actions"] = [submit_action()]
+                    result = self.lint(card)
+                    expected = (
+                        {"INPUT.REQUIRED_TYPE"} if not isinstance(value, bool)
+                        else {"ACCESS.ERROR_MESSAGE"} if value else set()
+                    )
+                    self.assertEqual(self.codes(result), expected)
+                    self.assertFalse(result.warnings)
+        card = base_card()
+        field = input_text()
+        field["isRequired"] = None
+        del field["errorMessage"]
+        card["body"].append(field)
+        card["actions"] = [submit_action()]
+        self.assert_card_diagnostic_without_traceback(card, "INPUT.REQUIRED_TYPE")
+
+    def test_input_visibility_boolean_policy_is_consistent(self):
+        for element_type in sorted(validate_cards.INPUT_TYPES):
+            for value in (True, False, None, "true", 0, []):
+                with self.subTest(element_type=element_type, isVisible=value):
+                    card = base_card()
+                    field = {
+                        "type": element_type, "id": "entry", "label": "Value",
+                        "isVisible": value,
+                    }
+                    if element_type == "Input.Toggle":
+                        field["title"] = "Acknowledge details"
+                    elif element_type == "Input.ChoiceSet":
+                        field["choices"] = [{"title": "One", "value": "one"}]
+                    card["body"].append(field)
+                    card["actions"] = [submit_action()]
+                    result = self.lint(card)
+                    expected = (
+                        {"ELEMENT.BOOLEAN_TYPE"} if not isinstance(value, bool)
+                        else set() if value else {"ACCESS.HIDDEN_INPUT"}
+                    )
+                    self.assertEqual(self.codes(result), expected)
+                    self.assertFalse(result.warnings)
+
     def test_duplicate_choice_values_are_rejected(self):
         card = base_card()
         card["body"].append(
@@ -413,6 +578,25 @@ class CardLinterTests(unittest.TestCase):
         card["actions"] = [{"type": "Action.Submit", "title": "Save request"}]
         result = self.lint(card)
         self.assertIn("SUBMIT.DATA", self.codes(result))
+
+    def test_non_object_submit_data_reports_every_contract_field(self):
+        for data in ("notanobject", 42, [], None):
+            with self.subTest(data=data):
+                card = base_card()
+                card["body"].append(input_text("cardId"))
+                action = submit_action()
+                action["data"] = data
+                card["actions"] = [action]
+                result = self.lint(card)
+                self.assertEqual(self.codes(result), {"SUBMIT.DATA", "SUBMIT.CONTRACT"})
+                self.assertEqual(
+                    {item.path for item in result.errors if item.code == "SUBMIT.CONTRACT"},
+                    {f"$.actions[0].data.{key}" for key in validate_cards.SUBMIT_CONTRACT_FIELDS},
+                )
+                self.assertEqual(len(result.errors), 6)
+                self.assertIs(action["data"], data)
+                self.assertFalse(result.warnings)
+                self.assert_card_diagnostic_without_traceback(card, "SUBMIT.CONTRACT")
 
     def test_submit_data_keys_cannot_collide_with_input_ids(self):
         keys = (
@@ -541,6 +725,42 @@ class CardLinterTests(unittest.TestCase):
                     {"type": "Action.OpenUrl", "title": "View documentation", "url": url}
                 ]
                 self.assert_card_diagnostic_without_traceback(card, "OPENURL.HTTPS")
+
+    def test_open_url_userinfo_is_rejected(self):
+        for userinfo in ("user:pass", "admin", "token:secret", "", ":"):
+            with self.subTest(userinfo=userinfo):
+                card = base_card()
+                card["actions"] = [{
+                    "type": "Action.OpenUrl", "title": "View documentation",
+                    "url": f"https://{userinfo}@example.com/x",
+                }]
+                self.assert_card_diagnostic_without_traceback(card, "OPENURL.HTTPS")
+
+    def test_open_url_invalid_ports_are_rejected(self):
+        for port in ("bad", "99999", "-1"):
+            with self.subTest(port=port):
+                card = base_card()
+                card["actions"] = [{
+                    "type": "Action.OpenUrl", "title": "View documentation",
+                    "url": f"https://example.com:{port}/x",
+                }]
+                self.assert_card_diagnostic_without_traceback(card, "OPENURL.HTTPS")
+
+    def test_valid_https_urls_with_optional_ports_remain_allowed(self):
+        for url in (
+            "https://example.com/x",
+            "https://example.com:443/x",
+            "https://example.com:65535/x",
+            "https://[::1]:8443/x",
+            "https://example.com/user@example.com",
+        ):
+            with self.subTest(url=url):
+                card = base_card()
+                card["actions"] = [{
+                    "type": "Action.OpenUrl", "title": "View documentation", "url": url,
+                }]
+                result = self.lint(card)
+                self.assertTrue(result.passes(warnings_as_errors=True), result.errors)
 
     def test_secret_input_identifier_variants_are_rejected(self):
         for input_id in (

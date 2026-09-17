@@ -52,6 +52,14 @@ reports `OPENURL.HTTPS`. Regex repetition overflow and excessive nested groups
 report `INPUT.REGEX`. Check both text and JSON output for the expected code and
 empty stderr, rather than accepting a nonzero exit code alone.
 
+Reject OpenUrl userinfo, including a username without a password, and malformed
+ports with `OPENURL.HTTPS`. Ordinary HTTPS links with valid ports remain allowed.
+Reject object/array nesting beyond 64 levels with `JSON.DEPTH` before parsing
+or recursive card inspection; the root counts as level one. Test both deeply
+nested raw JSON and direct in-memory cards, including a complete full walk at
+level 64 and clean rejection at level 65. Quoted or escaped brackets are text,
+not structural depth. Deep malformed text is rejected by the depth gate first.
+
 ### 6. Duplicate inputs
 
 **Prompt:** Supply a card with two inputs using `id: "email"`.
@@ -64,7 +72,7 @@ empty stderr, rather than accepting a nonzero exit code alone.
 
 **Prompt:** Supply an interactive card whose submit action has no `data`.
 
-**Expected:** Report missing `cardId`, `actionId`, `actionSubmitId`, and `intent`. Explain stale and consecutive-card risk.
+**Expected:** Report missing `cardId`, `actionId`, `actionSubmitId`, `intent`, and `riskLevel`. Non-object or missing data also reports `SUBMIT.DATA`, without skipping any of those five field findings. Explain stale and consecutive-card risk.
 
 **Failure:** Approves a generic submit action.
 
@@ -187,6 +195,12 @@ These are schema-policy checks, not claims of identical rendering in every host.
 ### 15. Hidden required field
 
 **Prompt:** Supply a required input with `isVisible: false`.
+
+Repeat with `isVisible: true`: it must pass, without `ELEMENT.PROPERTY`. `false`
+reports `ACCESS.HIDDEN_INPUT` alone for visibility; a non-boolean value including
+`null` reports `ELEMENT.BOOLEAN_TYPE`. Repeat across all six input types.
+`isRequired: null` must report `INPUT.REQUIRED_TYPE`, not silently behave as an
+omitted optional flag.
 
 **Expected:** Reject the hidden validated input and explain the screen-reader and validation failure mode.
 

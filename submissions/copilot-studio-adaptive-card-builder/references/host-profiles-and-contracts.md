@@ -46,7 +46,7 @@ The linter supports a deliberately conservative subset:
 ### Actions
 
 * `Action.Submit`
-* `Action.OpenUrl` with HTTPS
+* `Action.OpenUrl` with HTTPS, no URL userinfo, and a valid port when specified
 
 This subset is not the full Adaptive Cards schema. A type outside it can be valid Adaptive Cards JSON and still fail this linter because it is outside the package's portability and safety policy.
 
@@ -101,6 +101,13 @@ inputs:
 
 Input IDs are the stable contract. Changing an ID is a breaking change to downstream mappings.
 
+For every input type, `isRequired` must be boolean whenever present, including
+when its supplied value is `null`; invalid values report `INPUT.REQUIRED_TYPE`.
+Only `true` requires a useful `errorMessage`. Omission retains optional behavior.
+`isVisible` is supported on all six input types: omission and `true` keep the
+input visible; `false` reports only `ACCESS.HIDDEN_INPUT`. Non-boolean values,
+including `null`, report `ELEMENT.BOOLEAN_TYPE`, not an unsupported-property error.
+
 Suggested Copilot Studio output types:
 
 | Input type | Typical output type |
@@ -137,6 +144,12 @@ action:
 ```
 
 `actionSubmitId` identifies one button on one card version. `actionId` is a short stable branch key. `intent` gives a readable machine contract.
+
+When submit `data` is missing or is not an object, report `SUBMIT.DATA` plus one
+`SUBMIT.CONTRACT` finding for each missing field: `cardId`, `actionId`,
+`actionSubmitId`, `intent`, and `riskLevel`. The linter checks the fields against
+an empty object without modifying the supplied payload or inventing input
+collisions.
 
 Never branch on `actionId` alone. Before selecting a branch or invoking any work,
 match both `cardId` and `actionSubmitId` exactly against the currently awaited
@@ -351,6 +364,21 @@ syntax, repetition-overflow, or parser-recursion failures report `INPUT.REGEX`.
 These rejected values must produce diagnostics in text and JSON output, not an
 uncaught traceback. Compiling a card-supplied regex does not prove safe runtime
 matching in the target host; the linter does not execute that regex.
+
+`OPENURL.HTTPS` also rejects URL userinfo (username-only, username/password, or
+empty userinfo before `@`) and invalid or out-of-range ports. HTTPS does not
+make embedded credentials safe. A path containing `@` is not userinfo. Hostname
+trust and live network access are separate checks; the linter does not open URLs.
+
+`JSON.DEPTH` rejects more than **64 nested object/array levels**, counting the
+root object or array as level one. The limit includes all data, not just visual
+containers. An iterative, string-aware preflight checks JSON text before parsing;
+an iterative object preflight checks direct in-memory cards before any recursive
+sensitive-data or element scan. Brackets inside strings do not count. Specific
+`RecursionError` guards also return `JSON.DEPTH` if a runtime reaches its recursion
+capacity during parsing or card inspection. Simplify the nesting rather than
+raising the runtime limit. Over-limit malformed text or a non-object root is
+rejected by the depth gate before syntax/root-type diagnostics.
 
 ```yaml
 validation:
