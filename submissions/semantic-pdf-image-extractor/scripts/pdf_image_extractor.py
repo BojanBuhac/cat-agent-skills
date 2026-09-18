@@ -168,6 +168,22 @@ def parse_page_range(value: str) -> tuple[int, int]:
     return start, end
 
 
+def selected_render_pages(
+    total_page_count: int,
+    page_ranges: list[tuple[int, int]] | None,
+) -> tuple[list[tuple[int, int]], list[int]]:
+    require(total_page_count > 0, "PDF contains no pages")
+    requested_ranges = page_ranges or [(1, total_page_count)]
+    require(all(end <= total_page_count for _, end in requested_ranges),
+            "Render page range cannot exceed the PDF page count")
+    selected_page_numbers = sorted({
+        page_number
+        for start, end in requested_ranges
+        for page_number in range(start, end + 1)
+    })
+    return requested_ranges, selected_page_numbers
+
+
 def require_string_array(value: Any, field: str, unique: bool = False) -> list[str]:
     require(isinstance(value, list) and all(isinstance(item, str) for item in value),
             f"{field} must be an array of strings")
@@ -696,42 +712,40 @@ def command_render(args: argparse.Namespace) -> None:
             "Input must be an existing PDF")
     document_id = require_id(args.document_id, "document-id")
     output_dir = resolve_user_path(args.output_dir, "output-dir")
-    clear_current_run_metadata(output_dir)
-    pages_dir = prepare_page_directory(output_dir, document_id)
     try:
         document = pdfium.PdfDocument(str(input_path))
     except Exception as exc:
         raise ValidationError(f"Cannot open PDF; it may be corrupt or encrypted: {exc}") from exc
-    total_page_count = len(document)
-    require(total_page_count > 0, "PDF contains no pages")
-    requested_ranges = args.page_ranges or [(1, total_page_count)]
-    require(all(end <= total_page_count for _, end in requested_ranges),
-            "Render page range cannot exceed the PDF page count")
-    selected_page_numbers = sorted({
-        page_number
-        for start, end in requested_ranges
-        for page_number in range(start, end + 1)
-    })
-    scale = args.dpi / 72
-    rendered_pages: list[dict[str, Any]] = []
-    for page_number in selected_page_numbers:
-        page_index = page_number - 1
-        page = document[page_index]
-        bitmap = page.render(scale=scale)
-        image = bitmap.to_pil()
-        destination = pages_dir / f"page-{page_index + 1:04d}.png"
-        require_no_symlink_components(destination, str(destination))
-        image.save(destination, format="PNG", optimize=True)
-        rendered_pages.append({
-            "pageNumber": page_index + 1,
-            "image": destination.relative_to(output_dir).as_posix(),
-            "width": image.width,
-            "height": image.height,
-            "fileBytes": destination.stat().st_size,
-            "sha256": file_sha256(destination)
-        })
-        page.close()
-    document.close()
+    try:
+        total_page_count = len(document)
+        requested_ranges, selected_page_numbers = selected_render_pages(
+            total_page_count, args.page_ranges
+        )
+        clear_current_run_metadata(output_dir)
+        pages_dir = prepare_page_directory(output_dir, document_id)
+        scale = args.dpi / 72
+        rendered_pages: list[dict[str, Any]] = []
+        for page_number in selected_page_numbers:
+            page_index = page_number - 1
+            page = document[page_index]
+            try:
+                bitmap = page.render(scale=scale)
+                image = bitmap.to_pil()
+                destination = pages_dir / f"page-{page_index + 1:04d}.png"
+                require_no_symlink_components(destination, str(destination))
+                image.save(destination, format="PNG", optimize=True)
+                rendered_pages.append({
+                    "pageNumber": page_index + 1,
+                    "image": destination.relative_to(output_dir).as_posix(),
+                    "width": image.width,
+                    "height": image.height,
+                    "fileBytes": destination.stat().st_size,
+                    "sha256": file_sha256(destination)
+                })
+            finally:
+                page.close()
+    finally:
+        document.close()
     result = {
         "documentId": document_id,
         "sourceFile": input_path.name,
@@ -1243,6 +1257,17 @@ def command_self_test(_: argparse.Namespace) -> None:
         page_review_manifest["review"]["required"] = True
         validate_manifest_data(page_review_manifest)
         require(parse_page_range("2-4") == (2, 4), "Self-test page-range parser changed values")
+        ranges, selected_pages = selected_render_pages(5, [(2, 3), (5, 5)])
+        require(ranges == [(2, 3), (5, 5)] and selected_pages == [2, 3, 5],
+                "Self-test render page selection changed values")
+        expect_validation_error(
+            lambda: selected_render_pages(0, None),
+            "empty PDF before workspace cleanup"
+        )
+        expect_validation_error(
+            lambda: selected_render_pages(2, [(1, 3)]),
+            "out-of-range selection before workspace cleanup"
+        )
         for invalid_range in ("0-1", "3-2", "1", "true-2"):
             try:
                 parse_page_range(invalid_range)
