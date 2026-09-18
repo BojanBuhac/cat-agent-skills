@@ -60,7 +60,11 @@ diagnostics/
   validation-report.json
 ```
 
-`manifest.json` must conform to [the output schema](./references/output-schema.json). Paths inside JSON always use `/` separators and are relative to the result root.
+`manifest.json` must conform to [the output schema](./references/output-schema.json) and pass the
+bundled helper's `validate` or `package` command. Schema-only validation is insufficient because
+JSON Schema 2020-12 cannot compare positional array values; the helper additionally enforces
+`left < right` and `top < bottom` for every box. Paths inside JSON always use `/` separators and
+are relative to the result root.
 
 ## Workflow
 

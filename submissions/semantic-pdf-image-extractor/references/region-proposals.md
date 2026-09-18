@@ -35,6 +35,8 @@ Create `diagnostics/region-proposals.json` after inspecting all rendered pages a
 
 - Boxes are `[left, top, right, bottom]` in normalized page coordinates.
 - Every value is between 0 and 1, `left < right`, and `top < bottom`.
+- The Python helper is the normative validator for coordinate ordering because JSON Schema
+  2020-12 cannot compare values at different array positions.
 - `assetBox` tightly encloses the coherent visual.
 - `contextBox` is optional. When present, it contains `assetBox` and adds only the caption, legend, labels, callouts, or prose needed to interpret the asset.
 - Use the full page instead of a misleading crop when a coherent boundary cannot be established.

@@ -2,6 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:semantic-pdf-image-manifest:1.0",
   "title": "Semantic PDF Image Manifest",
+  "description": "Structural manifest schema. Acceptance also requires the bundled Python helper, which enforces cross-field invariants that JSON Schema 2020-12 cannot express for positional arrays, including left < right and top < bottom for boxes.",
+  "$comment": "Do not treat schema-only validation as complete manifest validation. Run scripts/pdf_image_extractor.py validate or package.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "generatedAt", "request", "documents", "assets", "duplicateGroups", "exclusions", "review", "limitations"],
@@ -21,6 +23,8 @@
     "relativePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?![A-Za-z]:)(?!\\.$)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000-\\u001F\\u007F-\\u009F]+$"},
     "nullableRelativePath": {"anyOf": [{"$ref": "#/$defs/relativePath"}, {"type": "null"}]},
     "box": {
+      "description": "Normalized [left, top, right, bottom] coordinates. JSON Schema enforces length, type, and 0..1 bounds; the required helper validation additionally enforces left < right and top < bottom.",
+      "$comment": "JSON Schema 2020-12 cannot compare values at different array positions. The helper's validate_box function is normative for positive width and height.",
       "type": "array",
       "prefixItems": [
         {"type": "number", "minimum": 0, "maximum": 1},
