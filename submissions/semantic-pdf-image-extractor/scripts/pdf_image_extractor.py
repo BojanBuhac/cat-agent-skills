@@ -78,6 +78,12 @@ def require_no_symlink_components(path: Path, field: str) -> None:
         require(not component.is_symlink(), f"{field} cannot traverse a symlink: {component}")
 
 
+def resolve_user_path(value: str, field: str) -> Path:
+    path = Path(value)
+    require_no_symlink_components(path, field)
+    return path.resolve()
+
+
 def write_json(path: Path, value: Any) -> None:
     require_no_symlink_components(path, str(path))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -689,7 +695,7 @@ def command_render(args: argparse.Namespace) -> None:
     require(input_path.is_file() and input_path.suffix.lower() == ".pdf",
             "Input must be an existing PDF")
     document_id = require_id(args.document_id, "document-id")
-    output_dir = Path(args.output_dir).resolve()
+    output_dir = resolve_user_path(args.output_dir, "output-dir")
     clear_current_run_metadata(output_dir)
     pages_dir = prepare_page_directory(output_dir, document_id)
     try:
@@ -745,7 +751,7 @@ def command_crop(args: argparse.Namespace) -> None:
         from PIL import Image
     except ImportError as exc:
         raise ValidationError("Cropping needs Pillow; use native runtime cropping or install it") from exc
-    output_dir = Path(args.output_dir).resolve()
+    output_dir = resolve_user_path(args.output_dir, "output-dir")
     require(output_dir.is_dir(), "Output directory does not exist")
     proposal = load_json(Path(args.regions).resolve())
     regions = validate_region_proposals(proposal, output_dir)
@@ -844,7 +850,7 @@ def hamming_distance(first: str, second: str) -> int:
 
 
 def command_duplicates(args: argparse.Namespace) -> None:
-    output_dir = Path(args.output_dir).resolve()
+    output_dir = resolve_user_path(args.output_dir, "output-dir")
     crop_results_path = Path(args.crop_results).resolve()
     crop_results = load_json(crop_results_path)
     require(isinstance(crop_results, dict) and crop_results.get("schemaVersion") == CROP_RESULT_VERSION,
@@ -951,7 +957,7 @@ def write_validation_report(output_dir: Path, manifest_path: Path, counts: dict[
 
 def command_validate(args: argparse.Namespace) -> None:
     manifest_path = Path(args.manifest).resolve()
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else None
+    output_dir = resolve_user_path(args.output_dir, "output-dir") if args.output_dir else None
     counts = validate_manifest_data(load_json(manifest_path), output_dir)
     if output_dir is not None:
         require(manifest_path.is_relative_to(output_dir), "Manifest must be inside the output directory")
@@ -989,7 +995,7 @@ def require_archive_file(output_dir: Path, relative_path: str) -> tuple[Path, st
 
 
 def command_package(args: argparse.Namespace) -> None:
-    output_dir = Path(args.output_dir).resolve()
+    output_dir = resolve_user_path(args.output_dir, "output-dir")
     manifest_argument = Path(args.manifest)
     manifest_path = manifest_argument.resolve()
     require(output_dir.is_dir(), "Output directory does not exist")
@@ -1002,9 +1008,7 @@ def command_package(args: argparse.Namespace) -> None:
     write_json(manifest_path, manifest)
     counts = validate_manifest_data(manifest, output_dir)
     write_validation_report(output_dir, manifest_path, counts)
-    archive_argument = Path(args.archive)
-    require(not archive_argument.is_symlink(), "Archive path cannot be a symlink")
-    archive = archive_argument.resolve()
+    archive = resolve_user_path(args.archive, "archive")
     require(not archive.is_relative_to(output_dir), "Archive must be outside the output directory")
     required_files = {
         "manifest.json",
@@ -1294,6 +1298,27 @@ def command_self_test(_: argparse.Namespace) -> None:
                 "render page-directory symlink"
             )
             require(outside_page.is_file(), "Self-test render cleanup deleted an external page")
+
+        output_target = temporary_path / "output-target"
+        output_target.mkdir()
+        output_link = temporary_path / "output-link"
+        archive_parent_target = temporary_path / "archive-parent-target"
+        archive_parent_target.mkdir()
+        archive_parent_link = temporary_path / "archive-parent-link"
+        try:
+            output_link.symlink_to(output_target, target_is_directory=True)
+            archive_parent_link.symlink_to(archive_parent_target, target_is_directory=True)
+        except OSError:
+            pass
+        else:
+            expect_validation_error(
+                lambda: resolve_user_path(str(output_link), "output-dir"),
+                "output-directory symlink"
+            )
+            expect_validation_error(
+                lambda: resolve_user_path(str(archive_parent_link / "result.zip"), "archive"),
+                "archive parent symlink"
+            )
         expect_manifest_error(
             "non-canonical manifest page image",
             lambda value: value["documents"][0]["pages"][0].update(
