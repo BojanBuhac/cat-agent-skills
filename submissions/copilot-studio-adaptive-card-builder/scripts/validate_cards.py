@@ -1087,7 +1087,7 @@ class CardLinter:
             _ = parsed.port
             valid_https = (
                 parsed.scheme.lower() == "https"
-                and bool(parsed.netloc)
+                and bool(parsed.hostname)
                 and parsed.username is None
                 and parsed.password is None
             )
