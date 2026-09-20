@@ -37,6 +37,10 @@
  * `src/content/skills/<slug>.md` (which authors never edit by hand). Any skill
  * that ships files beyond SKILL.md also gets a deterministic
  * `public/bundles/<slug>.zip`, with `bundle:` injected into the frontmatter.
+ * When `--copilot-studio-output <dir>` is supplied, canonical skills whose
+ * catalog metadata includes `Copilot Studio` are also exported unpacked to that
+ * temporary directory. CI publishes the result on the generated
+ * `copilot-studio-skills` branch rather than duplicating it on `main`.
  *
  * Bundling is VERBATIM — no file classification logic. An unpacked skill is
  * zipped exactly as authored (minus the metadata sidecar); a grandfathered
@@ -47,6 +51,7 @@
  * Usage:
  *   tsx scripts/import-submissions.ts            # import everything
  *   tsx scripts/import-submissions.ts --check    # validate only, write nothing
+ *   tsx scripts/import-submissions.ts --copilot-studio-output <dir>
  */
 import {
   existsSync,
@@ -57,7 +62,17 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, posix, relative, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
+import { pathToFileURL } from "node:url";
 import AdmZip from "adm-zip";
 import matter from "gray-matter";
 import { validateSkillData } from "./validate-skill.ts";
@@ -130,7 +145,8 @@ const checkOnly = process.argv.includes("--check");
 
 type ImportProblem = { source: string; problems: string[] };
 /** A file inside a submission, with a forward-slash relative path. */
-type SubFile = { path: string; data: Buffer };
+export type SkillPayloadFile = { path: string; data: Buffer };
+type SubFile = SkillPayloadFile;
 /** A loaded submission (folder or packed zip), before parsing/validation. */
 type Submission = {
   slug: string;
@@ -208,6 +224,54 @@ function buildContent(meta: Record<string, unknown>, body: string): string {
   return serializeFrontmatter(meta) + body.replace(/^\s+/, "");
 }
 
+/**
+ * Documented, human-authored catalog fields that may flow from a submission's
+ * `metadata.*` sidecar into the generated frontmatter as-authored. This is an
+ * ALLOWLIST: any catalog key not listed here — undocumented noise, or a
+ * canonical field the importer owns — is dropped, so it can neither leak into
+ * the output nor override a derived value. The canonical/derived fields
+ * (`name`, `description`, `agentDescription`, `type`, `bundle`) are deliberately
+ * absent because the processor is their single source of truth. `platforms` IS
+ * here because skills author it in metadata; plugins and automations pass it as
+ * a derived field instead, which wins. Keep in sync with src/lib/skill-schema.ts.
+ */
+export const CATALOG_PASSTHROUGH = [
+  "platforms",
+  "tags",
+  "author",
+  "authorUrl",
+  "authorGithub",
+  "version",
+  "createdAt",
+  "updatedAt",
+  "coverColor",
+  "featured",
+] as const;
+
+/**
+ * Merge derived/canonical frontmatter with catalog metadata under one policy
+ * shared by every processor, so the "silent override" bug class cannot recur:
+ *   1. Only `CATALOG_PASSTHROUGH` fields are copied from `catalog` (allowlist —
+ *      undocumented or protected keys are dropped, failing safe).
+ *   2. `derived` fields are applied AFTER, so a computed/canonical value always
+ *      wins over a same-named catalog key and can never be forgotten.
+ * `undefined` derived values are skipped so callers can pass optional fields
+ * (e.g. `bundle`, `agentDescription`) uniformly without emitting empty keys.
+ */
+export function buildMeta(
+  derived: Record<string, unknown>,
+  catalog: Record<string, unknown>,
+): Record<string, unknown> {
+  const meta: Record<string, unknown> = {};
+  for (const key of CATALOG_PASSTHROUGH) {
+    if (catalog[key] !== undefined) meta[key] = catalog[key];
+  }
+  for (const [key, value] of Object.entries(derived)) {
+    if (value !== undefined) meta[key] = value;
+  }
+  return meta;
+}
+
 // A bare GitHub username: 1-39 chars, alphanumerics or single (non-leading,
 // non-trailing) hyphens. Mirrors the rule enforced by the skill schema.
 const GITHUB_USERNAME = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
@@ -283,6 +347,56 @@ function writeIfChanged(path: string, content: string): void {
   writeFileSync(path, content, "utf8");
 }
 
+/** Write one unpacked skill in the shape consumed by Copilot Studio's GitHub importer. */
+export function writeCopilotStudioSkill(
+  outputDir: string,
+  slug: string,
+  skillMd: string,
+  resourceFiles: SkillPayloadFile[],
+): void {
+  for (const file of resourceFiles) {
+    const segments = file.path.split("/");
+    if (segments.some((segment) => !segment || segment === "." || segment === "..")) {
+      throw new Error(`Refusing to publish unsafe skill resource path: ${file.path}`);
+    }
+  }
+
+  const outDir = join(outputDir, slug);
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, BUNDLE_INSTRUCTIONS_NAME), skillMd);
+  for (const file of resourceFiles) {
+    const segments = file.path.split("/");
+    const outPath = join(outDir, ...segments);
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, file.data);
+  }
+}
+
+export function targetsCopilotStudio(meta: Record<string, unknown>): boolean {
+  return Array.isArray(meta.platforms) && meta.platforms.includes("Copilot Studio");
+}
+
+function copilotStudioOutputDir(): string | undefined {
+  const index = process.argv.indexOf("--copilot-studio-output");
+  if (index < 0) return undefined;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error("`--copilot-studio-output` requires a directory path");
+  }
+
+  const outputDir = resolve(value);
+  const rootFromOutput = relative(outputDir, ROOT);
+  const outputContainsRoot =
+    rootFromOutput === "" ||
+    (!rootFromOutput.startsWith(`..${sep}`) &&
+      rootFromOutput !== ".." &&
+      !isAbsolute(rootFromOutput));
+  if (outputContainsRoot) {
+    throw new Error("Copilot Studio output directory must not be the repository root or any parent directory");
+  }
+  return outputDir;
+}
+
 /**
  * Publish (or remove) the optional human-facing overview for an entry.
  * When the submission has a `README.md`, it is written verbatim to
@@ -350,7 +464,10 @@ function classifyPayload(sub: Submission, files: SubFile[]): void {
 }
 
 /** Validate + generate one classified submission. */
-function processSubmission(sub: Submission): ImportProblem | null {
+function processSubmission(
+  sub: Submission,
+  copilotStudioOutput: string | undefined,
+): ImportProblem | null {
   const { slug, label } = sub;
   if (sub.loadProblems?.length) {
     return { source: label, problems: sub.loadProblems };
@@ -412,19 +529,22 @@ function processSubmission(sub: Submission): ImportProblem | null {
   }
   if (problems.length) return { source: label, problems };
 
-  // Merge into the canonical frontmatter. The gallery `name` is the human display
-  // name from metadata; the slug (SKILL.md `name`) is the file id used for the
-  // route and the downloadable SKILL.md. The agent description gets its own key.
-  const { name: displayName, description: catalogDescription, ...catalogRest } = catalog;
-  const meta: Record<string, unknown> = {
-    name: displayName,
-    description: catalogDescription,
-    agentDescription,
-    ...catalogRest,
-  };
-
+  // Merge into the canonical frontmatter via the shared allowlist policy. The
+  // gallery `name` is the human display name from metadata; the slug (SKILL.md
+  // `name`) is the file id used for the route and the downloadable SKILL.md. The
+  // agent-facing description gets its own key and can never be overridden by the
+  // sidecar; documented catalog fields (`platforms`, `tags`, `author`, …) pass
+  // through.
   const hasBundle = sub.bundleFiles.length > 0;
-  if (hasBundle) meta.bundle = `bundles/${slug}.zip`;
+  const meta = buildMeta(
+    {
+      name: catalog.name,
+      description: catalog.description,
+      agentDescription,
+      bundle: hasBundle ? `bundles/${slug}.zip` : undefined,
+    },
+    catalog,
+  );
 
   resolveAuthorGithub(meta);
 
@@ -445,9 +565,20 @@ function processSubmission(sub: Submission): ImportProblem | null {
       ];
       writeBundle(bundleFiles, join(BUNDLES_DIR, `${slug}.zip`));
     }
+    if (copilotStudioOutput && targetsCopilotStudio(meta)) {
+      writeCopilotStudioSkill(
+        copilotStudioOutput,
+        sub.slug,
+        sub.skillMd,
+        sub.bundleFiles,
+      );
+    }
     console.log(
       `\u2713 ${label} \u2192 src/content/skills/${slug}.md` +
-        (hasBundle ? ` (+ public/bundles/${slug}.zip)` : ""),
+        (hasBundle ? ` (+ public/bundles/${slug}.zip)` : "") +
+        (copilotStudioOutput && targetsCopilotStudio(meta)
+          ? ` (+ Copilot Studio export)`
+          : ""),
     );
   }
   return null;
@@ -551,23 +682,19 @@ function processPlugin(sub: Submission): ImportProblem | null {
   }
   if (problems.length) return { source: label, problems };
 
-  // A plugin is Cowork-only; drop any name/description/platforms/type from the
-  // sidecar so they can't override the derived values.
-  const {
-    name: _n,
-    description: _d,
-    platforms: _p,
-    type: _t,
-    ...catalogRest
-  } = catalog;
-  const meta: Record<string, unknown> = {
-    name: displayName,
-    description: catalogDescription,
-    platforms: ["Cowork"],
-    type: "plugin",
-    ...catalogRest,
-    bundle: `bundles/${slug}.zip`,
-  };
+  // A plugin is Cowork-only. The shared allowlist keeps name/description/
+  // platforms/type/bundle authoritative (derived) so the sidecar can't override
+  // them; documented catalog fields (tags, author, …) still pass through.
+  const meta = buildMeta(
+    {
+      name: displayName,
+      description: catalogDescription,
+      platforms: ["Cowork"],
+      type: "plugin",
+      bundle: `bundles/${slug}.zip`,
+    },
+    catalog,
+  );
 
   resolveAuthorGithub(meta);
 
@@ -698,24 +825,19 @@ function processAutomationInstaller(sub: Submission): ImportProblem | null {
   }
   if (problems.length) return { source: label, problems };
 
-  // An installer is a Scout automation; drop any name/description/platforms/type
-  // from the sidecar so they can't override the derived values.
-  const {
-    name: displayName,
-    description: catalogDescription,
-    platforms: _p,
-    type: _t,
-    ...catalogRest
-  } = catalog;
-  const meta: Record<string, unknown> = {
-    name: displayName,
-    description: catalogDescription,
-    platforms: ["Scout"],
-    type: "automation",
-    ...catalogRest,
-    // A `.zip` bundle (vs a `.json`) is what marks this automation as an installer.
-    bundle: `bundles/${slug}.zip`,
-  };
+  // An installer is a Scout automation. The shared allowlist keeps name/
+  // description/platforms/type/bundle authoritative (derived); documented catalog
+  // fields still pass through. A `.zip` bundle (vs a `.json`) marks it an installer.
+  const meta = buildMeta(
+    {
+      name: catalog.name,
+      description: catalog.description,
+      platforms: ["Scout"],
+      type: "automation",
+      bundle: `bundles/${slug}.zip`,
+    },
+    catalog,
+  );
 
   resolveAuthorGithub(meta);
 
@@ -801,23 +923,19 @@ function processAutomation(sub: Submission): ImportProblem | null {
   }
   if (problems.length) return { source: label, problems };
 
-  // An automation is Scout-only; drop any name/description/platforms/type from
-  // the sidecar so they can't override the derived values.
-  const {
-    name: _n,
-    description: _d,
-    platforms: _p,
-    type: _t,
-    ...catalogRest
-  } = catalog;
-  const meta: Record<string, unknown> = {
-    name: displayName,
-    description: catalogDescription,
-    platforms: ["Scout"],
-    type: "automation",
-    ...catalogRest,
-    bundle: `bundles/${slug}.json`,
-  };
+  // An automation is Scout-only. The shared allowlist keeps name/description/
+  // platforms/type/bundle authoritative (derived); documented catalog fields
+  // still pass through.
+  const meta = buildMeta(
+    {
+      name: displayName,
+      description: catalogDescription,
+      platforms: ["Scout"],
+      type: "automation",
+      bundle: `bundles/${slug}.json`,
+    },
+    catalog,
+  );
 
   resolveAuthorGithub(meta);
 
@@ -957,6 +1075,8 @@ function loadSubmission(dir: string): Submission {
 }
 
 function main() {
+  const copilotStudioOutput = copilotStudioOutputDir();
+
   if (!existsSync(SUBMISSIONS_DIR)) {
     console.log("No submissions/ directory \u2014 nothing to import.");
     return;
@@ -978,9 +1098,16 @@ function main() {
     return;
   }
 
+  if (!checkOnly && copilotStudioOutput) {
+    // Rebuild from scratch so removed skills and platform changes cannot leave
+    // stale entries in the generated branch.
+    rmSync(copilotStudioOutput, { recursive: true, force: true });
+    mkdirSync(copilotStudioOutput, { recursive: true });
+  }
+
   const problems: ImportProblem[] = [];
   for (const sub of submissions) {
-    const p = processSubmission(sub);
+    const p = processSubmission(sub, copilotStudioOutput);
     if (p) problems.push(p);
   }
 
@@ -1008,4 +1135,7 @@ function main() {
   );
 }
 
-main();
+// Only run the CLI when executed directly (not when imported by tests).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}
