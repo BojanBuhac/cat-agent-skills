@@ -117,7 +117,7 @@ def generate_evaluations(
                     prompt=(
                         f"What can you help me with related to '{name}'?"
                     ),
-                    expected_response=f"I can help with {description}",
+expected_response="[REPLACE: Add the accurate capability summary and discovery response.]",
                     test_id=f"{prefix}-DISCOVERY",
                     category="skill-discovery",
                     notes=(
