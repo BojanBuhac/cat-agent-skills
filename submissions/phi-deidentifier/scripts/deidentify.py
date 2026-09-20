@@ -14,7 +14,7 @@ Usage:
     python deidentify.py INPUT.txt --map crosswalk.json   # ALSO write reversible token->value map (SENSITIVE)
     python deidentify.py INPUT.txt --json                 # print machine-readable result to stdout
 
-Exit codes: 0 = success, 2 = usage error.
+Exit codes: 0 = success, 2 = usage error, 3 = guard failure when --strict is set.
 """
 from __future__ import annotations
 
